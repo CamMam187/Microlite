@@ -8,6 +8,8 @@ import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.quest.logic.PiratesTreasure;
+import net.runelite.client.plugins.microbot.quest.logic.QuestRegistry;
 import net.runelite.client.plugins.microbot.questhelper.QuestHelperPlugin;
 import net.runelite.client.plugins.microbot.questhelper.questinfo.QuestHelperQuest;
 import net.runelite.client.plugins.microbot.questhelper.requirements.Requirement;
@@ -29,6 +31,7 @@ import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
 import net.runelite.client.plugins.microbot.util.tile.Rs2Tile;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -54,13 +57,18 @@ public class MQuestScript extends Script {
     int unreachableTargetCheckDist = 1;
 
     private MQuestConfig config;
-    private static ArrayList<NPC> npcsHandled = new ArrayList<>();
+    private MQuestPlugin mQuestPlugin;
+    private static ArrayList<Rs2NpcModel> npcsHandled = new ArrayList<>();
     private static ArrayList<TileObject> objectsHandeled = new ArrayList<>();
 
     QuestStep dialogueStartedStep = null;
 
-    public boolean run(MQuestConfig config) {
+
+
+    public boolean run(MQuestConfig config, MQuestPlugin mQuestPlugin) {
         this.config = config;
+        this.mQuestPlugin = mQuestPlugin;
+
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
@@ -114,36 +122,59 @@ public class MQuestScript extends Script {
                                 }
                             } else {
                                 Rs2Widget.clickWidget(widget.getId());
+                                if (Rs2Shop.isOpen() && getQuestHelperPlugin().getSelectedQuest().getQuest().getId() == Quest.PIRATES_TREASURE.getId()) {
+                                    Rs2Shop.buyItemOptimally("karamjan rum", 1);
+                                }
                                 return;
                             }
                         }
                     }
                 }
 
-                //custom code for specific scenario's not handled by the quest plugin by runelite
-                if (getQuestHelperPlugin().getSelectedQuest().getQuest().getId() == Quest.ROMEO__JULIET.getId()) {
-                    if (questStep.getText().contains("Bring the cadava berries to the Apothecary in south east Varrock.")) {
-                        boolean hasCadavaBerries = fetchCadavaBerries();
-                        if (!hasCadavaBerries) {
-                            return;
-                        }
+                /**
+                 * Execute custom logic for the quest
+                 */
+                var questLogic = QuestRegistry.getQuest(getQuestHelperPlugin().getSelectedQuest().getQuest().getId());
+                if (questLogic instanceof PiratesTreasure) {
+                    ((PiratesTreasure) questLogic).setMQuestPlugin(mQuestPlugin);
+                }
+                if (questLogic != null) {
+                    if (!questLogic.executeCustomLogic()) {
+                        return;
                     }
                 }
 
-
-                if (getQuestHelperPlugin().getSelectedQuest() != null && !Microbot.getClientThread().runOnClientThread(() -> getQuestHelperPlugin().getSelectedQuest().isCompleted())) {
+                if (getQuestHelperPlugin().getSelectedQuest() != null && !Microbot.getClientThread().runOnClientThreadOptional(() ->
+                        getQuestHelperPlugin().getSelectedQuest().isCompleted()).orElse(null)) {
                     if (Rs2Widget.isWidgetVisible(ComponentID.DIALOG_OPTION_OPTIONS) && getQuestHelperPlugin().getSelectedQuest().getQuest().getId() != Quest.COOKS_ASSISTANT.getId() && !Rs2Bank.isOpen()) {
                         boolean hasOption = Rs2Dialogue.handleQuestOptionDialogueSelection();
                         //if there is no quest option in the dialogue, just click player location to remove
                         // the dialogue to avoid getting stuck in an infinite loop of dialogues
                         if (!hasOption) {
+                            if (getQuestHelperPlugin().getSelectedQuest() != null &&
+                                    getQuestHelperPlugin().getSelectedQuest().getQuest().getId() == Quest.IMP_CATCHER.getId()
+                                    && Microbot.getClient().getTopLevelWorldView().getPlane() == 1) {
+                                Rs2Dialogue.keyPressForDialogueOption(1); // presses option 1
+                                sleep(1200,1800);
+                            }
                             Rs2Walker.walkFastCanvas(Rs2Player.getWorldLocation());
                         }
                         return;
                     }
 
+                    if (getQuestHelperPlugin().getSelectedQuest() != null &&
+                            getQuestHelperPlugin().getSelectedQuest().getQuest().getId() == Quest.COOKS_ASSISTANT.getId() &&
+                            Rs2Dialogue.isInDialogue()) {
+                        dialogueStartedStep = questStep;  // Force this to be true for Cook's Assistant
+                    }
+
+                    if (getQuestHelperPlugin().getSelectedQuest() != null &&
+                            getQuestHelperPlugin().getSelectedQuest().getQuest().getId() == Quest.PIRATES_TREASURE.getId() &&
+                            Rs2Dialogue.isInDialogue()) {
+                        dialogueStartedStep = questStep;
+                    }
+
                     if (Rs2Dialogue.isInDialogue() && dialogueStartedStep == questStep) {
-                        // Stop walker if in dialogue
                         Rs2Walker.setTarget(null);
                         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
                         return;
@@ -192,25 +223,13 @@ public class MQuestScript extends Script {
                     sleepUntil(() -> Rs2Player.isInteracting() || Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Dialogue.isInDialogue(), 500);
                     sleepUntil(() -> !Rs2Player.isInteracting() && !Rs2Player.isMoving() && !Rs2Player.isAnimating());
                 }
+
             } catch (Exception ex) {
                 System.out.println(ex.getMessage());
                 ex.printStackTrace(System.out);
             }
         }, 0, Rs2Random.between(400, 1000), TimeUnit.MILLISECONDS);
         return true;
-    }
-
-    private boolean fetchCadavaBerries() {
-        if (Rs2Inventory.hasItem(ItemID.CADAVA_BERRIES)) {
-            return true;
-        }
-        if (Rs2Walker.walkTo(3266, 3374, 0, 10)) {
-            Rs2GameObject.interact(new int[] {ObjectID.CADAVA_BUSH, ObjectID.CADAVA_BUSH_23626, ObjectID.CADAVA_BUSH_23627}, "take");
-            Rs2Player.waitForWalking();
-            Rs2Inventory.waitForInventoryChanges(2000);
-        }
-
-        return Rs2Inventory.hasItem(ItemID.CADAVA_BERRIES);
     }
 
     private boolean handleRequirements(DetailedQuestStep questStep) {
@@ -403,9 +422,9 @@ public class MQuestScript extends Script {
                 Rs2GameObject.interact(object);
             }
 
-            sleepUntil(() -> Rs2Player.isWalking() || Rs2Player.isAnimating());
+            sleepUntil(() -> Rs2Player.isMoving() || Rs2Player.isAnimating());
             sleep(100);
-            sleepUntil(() -> !Rs2Player.isWalking() && !Rs2Player.isAnimating());
+            sleepUntil(() -> !Rs2Player.isMoving() && !Rs2Player.isAnimating());
             objectsHandeled.add(object);
         }
 
@@ -438,7 +457,8 @@ public class MQuestScript extends Script {
     }
 
     private String chooseCorrectObjectOption(QuestStep step, TileObject object) {
-        ObjectComposition objComp = Microbot.getClientThread().runOnClientThread(() -> Microbot.getClient().getObjectDefinition(object.getId()));
+        ObjectComposition objComp = Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient().getObjectDefinition(object.getId())).orElse(null);
 
         if (objComp == null)
             return "";
@@ -459,7 +479,8 @@ public class MQuestScript extends Script {
     }
 
     private String chooseCorrectNPCOption(QuestStep step, NPC npc) {
-        var npcComp = Microbot.getClientThread().runOnClientThread(() -> Microbot.getClient().getNpcDefinition(npc.getId()));
+        var npcComp = Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient().getNpcDefinition(npc.getId()))
+                .orElse(null);
 
         if (npcComp == null)
             return "Talk-to";

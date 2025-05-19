@@ -1,14 +1,12 @@
 package net.runelite.client.plugins.microbot.driftnet;
 
 import net.runelite.api.ItemID;
-import net.runelite.api.NPC;
 import net.runelite.api.ObjectID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
-import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -19,14 +17,12 @@ import org.slf4j.LoggerFactory;
 import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.List;
-
 
 import static net.runelite.client.plugins.microbot.Microbot.log;
-import static net.runelite.client.plugins.microbot.util.Global.sleepGaussian;
 
 public class DriftNetScript extends Script {
 
@@ -73,8 +69,7 @@ public class DriftNetScript extends Script {
                 // 4) Handle any nets that are either FULL or UNSET
                 if (DriftNetPlugin.getNETS().stream().anyMatch(x ->
                         x.getStatus() == DriftNetStatus.FULL ||
-                                x.getStatus() == DriftNetStatus.UNSET))
-                {
+                                x.getStatus() == DriftNetStatus.UNSET)) {
                     processNets(config);
                     return;
                 }
@@ -96,13 +91,16 @@ public class DriftNetScript extends Script {
      * Increments netFetchAttempts if no nets were found
      */
     private void fetchNetsFromAnnette() {
-
+        final int maxWeight = 25; // https://oldschool.runescape.wiki/w/Drift_net_fishing
+        var maxDriftnets = maxWeight - Microbot.getClient().getWeight() - 1; // Driftnets are 1kg each; doing - 1 to be safe
         Rs2GameObject.interact(ObjectID.ANNETTE, "Nets");
         sleepUntil(() -> Rs2Widget.getWidget(20250629) != null);
-        Rs2Widget.clickWidgetFast(Rs2Widget.getWidget(20250629), 0, 4);
-
+        Rs2Widget.clickWidgetFast(Rs2Widget.getWidget(20250629), 0, 3);
         sleepGaussian(1500, 300);
-
+        Rs2Keyboard.typeString(String.valueOf(maxDriftnets));
+        sleepGaussian(1500, 300);
+        Rs2Keyboard.keyPress(KeyEvent.VK_ENTER);
+        sleepGaussian(1500, 300);
         Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
 
         netFetchAttempts++;
@@ -115,7 +113,8 @@ public class DriftNetScript extends Script {
     private void processNets(DriftNetConfig config) {
         for (DriftNet net : DriftNetPlugin.getNETS()) {
 
-            final Shape netShape = Microbot.getClientThread().runOnClientThread(net.getNet()::getConvexHull);
+            final Shape netShape = Microbot.getClientThread().runOnClientThreadOptional(net.getNet()::getConvexHull)
+                    .orElse(null);
 
             if (netShape == null) {
                 continue;
@@ -140,21 +139,21 @@ public class DriftNetScript extends Script {
      */
     private void handleFullNet(DriftNet net, DriftNetConfig config) {
 
-            // 1) Interact with the net
-            Rs2GameObject.interact(net.getNet());
+        // 1) Interact with the net
+        Rs2GameObject.interact(net.getNet());
 
-            if (config.bankFish()) {
+        if (config.bankFish()) {
 
-                boolean initialWidgetLoaded = sleepUntil(
-                        () -> Rs2Widget.getWidget(39780359) != null,
-                        10000
-                );
-                    Rs2Widget.clickWidget(39780359);
-                    sleepUntil(() -> Rs2Widget.isWidgetVisible(39780365));
-                    Rs2Widget.clickWidget(39780365);
+            boolean initialWidgetLoaded = sleepUntil(
+                    () -> Rs2Widget.getWidget(39780359) != null,
+                    10000
+            );
+            Rs2Widget.clickWidget(39780359);
+            sleepUntil(() -> Rs2Widget.isWidgetVisible(39780365));
+            Rs2Widget.clickWidget(39780365);
 
 
-            }
+        }
     }
 
     /**
@@ -169,8 +168,7 @@ public class DriftNetScript extends Script {
      * Iterates over nearby fish (sorted by distance to player) and chases the first
      * fish that hasn’t been tagged yet.
      */
-    private void chaseNearbyFish(Set<Integer> fishSet)
-    {
+    private void chaseNearbyFish(Set<Integer> fishSet) {
         // Sort the NPC indexes by distance to the player
         List<Integer> sortedFish = fishSet.stream()
                 .sorted(Comparator.comparingInt(fishIndex -> {
@@ -183,7 +181,7 @@ public class DriftNetScript extends Script {
                         }
                 ))
                 .collect(Collectors.toList());
-        
+
         for (int fishIndex : sortedFish) {
             if (DriftNetPlugin.getTaggedFish().containsKey(fishIndex)) continue;
 

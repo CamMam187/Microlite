@@ -4,6 +4,7 @@ import net.runelite.api.GameObject;
 import net.runelite.api.ItemID;
 import net.runelite.api.NpcID;
 import net.runelite.api.Skill;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.mining.enums.Rocks;
@@ -15,7 +16,9 @@ import net.runelite.client.plugins.microbot.util.depositbox.Rs2DepositBox;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.security.Login;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.util.Arrays;
@@ -30,7 +33,7 @@ enum State {
 
 public class AutoMiningScript extends Script {
 
-    public static final String version = "1.4.3";
+    public static final String version = "1.4.4";
     private static final int GEM_MINE_UNDERGROUND = 11410;
     private static final int BASALT_MINE = 11425;
     State state = State.MINING;
@@ -59,6 +62,39 @@ public class AutoMiningScript extends Script {
 
                 if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Microbot.pauseAllScripts) return;
 
+                //code to change worlds if there are too many players in the distance to stray tiles
+                int maxPlayers = config.maxPlayersInArea();
+                if (maxPlayers > 0) {
+                    WorldPoint localLocation = Rs2Player.getWorldLocation();
+
+                    long nearbyPlayers = Microbot.getClient().getPlayers().stream()
+                            .filter(p -> p != null && p != Microbot.getClient().getLocalPlayer())
+                            .filter(p -> {
+                                if (config.distanceToStray() == 0) {
+                                    // Only count players standing on the same exact tile
+                                    return p.getWorldLocation().equals(localLocation);
+                                }
+                                // Count players within distanceToStray
+                                return p.getWorldLocation().distanceTo(localLocation) <= config.distanceToStray();
+                            })
+                            //filter if players are using mining animation
+                            .filter(p -> p.getAnimation() != -1)
+                            .count();
+
+                    if (nearbyPlayers >= maxPlayers) {
+                        Microbot.status = "Too many players nearby. Hopping...";
+                        Rs2Random.waitEx(3200, 800); // Delay to avoid UI locking
+
+                        int world = Login.getRandomWorld(Rs2Player.isMember());
+                        boolean hopped = Microbot.hopToWorld(world);
+                        if (hopped) {
+                            Microbot.status = "Hopped to world: " + world;
+                            return; // Exit current cycle after hop
+                        }
+                    }
+                }
+
+
                 switch (state) {
                     case MINING:
                         if (Rs2Inventory.isFull()) {
@@ -82,11 +118,16 @@ public class AutoMiningScript extends Script {
                         if (config.useBank()) {
                             if (config.ORE() == Rocks.GEM && Rs2Player.getWorldLocation().getRegionID() == GEM_MINE_UNDERGROUND) {
                                 if (Rs2DepositBox.openDepositBox()) {
-                                    Rs2DepositBox.depositAll();
+                                    if (Rs2Inventory.contains("Open gem bag")) {
+                                        Rs2Inventory.interact("Open gem bag", "Empty");
+                                        Rs2DepositBox.depositAllExcept("Open gem bag");
+                                    } else {
+                                        Rs2DepositBox.depositAll();
+                                    }
                                     Rs2DepositBox.closeDepositBox();
                                 }
                             }
-                            if (config.ORE() == Rocks.BASALT && Rs2Player.getWorldLocation().getRegionID() == BASALT_MINE) {
+                            else if (Rocks.BASALT == config.ORE() && BASALT_MINE == Rs2Player.getWorldLocation().getRegionID()) {
                                 if (Rs2Walker.walkTo(2872,3935,0)){
                                     Rs2Inventory.useItemOnNpc(ItemID.BASALT, NpcID.SNOWFLAKE);
                                     Rs2Walker.walkTo(2841,10339,0);

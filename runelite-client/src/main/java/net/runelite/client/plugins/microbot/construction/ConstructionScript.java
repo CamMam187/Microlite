@@ -56,7 +56,7 @@ public class ConstructionScript extends Script {
                 }
                 //System.out.println(hasPayButlerDialogue());
             } catch (Exception ex) {
-                System.out.println(ex.getMessage());
+                Microbot.logStackTrace(this.getClass().getSimpleName(), ex);
             }
         }, 0, 600, TimeUnit.MILLISECONDS);
         return true;
@@ -109,10 +109,10 @@ public class ConstructionScript extends Script {
         NPC butler = getButler();
         boolean butlerIsToFar;
         if (butler == null) return;
-        butlerIsToFar = Microbot.getClientThread().runOnClientThread(() -> {
+        butlerIsToFar = Microbot.getClientThread().runOnClientThreadOptional(() -> {
             int distance = butler.getWorldLocation().distanceTo(Microbot.getClient().getLocalPlayer().getWorldLocation());
             return distance > 3;
-        });
+        }).orElse(false);
         if (!butlerIsToFar) {
             Rs2Npc.interact(butler, "talk-to");
         } else {

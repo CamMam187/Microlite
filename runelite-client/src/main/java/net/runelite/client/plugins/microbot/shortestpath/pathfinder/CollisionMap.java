@@ -97,7 +97,7 @@ public class CollisionMap {
             new WorldPoint(3672, 3862, 0)
     );
 
-    public List<Node> getNeighbors(Node node, VisitedTiles visited, PathfinderConfig config, WorldPoint target) {
+    public List<Node> getNeighbors(Node node, VisitedTiles visited, PathfinderConfig config, Set<WorldPoint> targets) {
         final int x = WorldPointUtil.unpackWorldX(node.packedPosition);
         final int y = WorldPointUtil.unpackWorldY(node.packedPosition);
         final int z = WorldPointUtil.unpackWorldPlane(node.packedPosition);
@@ -105,34 +105,21 @@ public class CollisionMap {
         neighbors.clear();
 
         @SuppressWarnings("unchecked") // Casting EMPTY_LIST to List<Transport> is safe here
-        Set<Transport> transports = config.getTransportsPacked().getOrDefault(node.packedPosition, (Set<Transport>) Collections.EMPTY_SET);
+        Set<Transport> transports = config.getTransportsPacked().getOrDefault(node.packedPosition, (Set<Transport>)Collections.EMPTY_SET);
 
         // Transports are pre-filtered by PathfinderConfig.refreshTransports
         // Thus any transports in the list are guaranteed to be valid per the user's settings
         for (Transport transport : transports) {
             //START microbot variables
             if (visited.get(transport.getDestination())) continue;
-            if (config.isIgnoreTeleportAndItems() &&
-                    (transport.getType() == TransportType.TELEPORTATION_SPELL ||
-                            transport.getType() == TransportType.TELEPORTATION_ITEM)) continue;
-
-            //EXCEPTION
-            if (transport.getType() == TransportType.MINECART) {
-                //avoid using minecart if you ned to go dwarven mines or mining guild
-                if (target.getRegionID() == 12183 || target.getRegionID() == 12184
-                        || target.getRegionID() == 12439 || target.getRegionID() == 12951) {
-                    continue;
-                }
-            }
-
-            if (transport.getType() == TransportType.TELEPORTATION_ITEM || transport.getType() == TransportType.TELEPORTATION_SPELL) {
-                neighbors.add(new TransportNode(transport.getDestination(), node, config.getDistanceBeforeUsingTeleport() + transport.getDuration(), transport.getType(), transport.getDisplayInfo()));
+            if (config.isIgnoreTeleportAndItems() && TransportType.isTeleport(transport.getType())) continue;
+            if (TransportType.isTeleport(transport.getType())) {
+                neighbors.add(new TransportNode(transport.getDestination(), node, config.getDistanceBeforeUsingTeleport() + transport.getDuration()));
             } else {
-                neighbors.add(new TransportNode(transport.getDestination(), node, transport.getDuration(), transport.getType(), transport.getDisplayInfo()));
+                neighbors.add(new TransportNode(transport.getDestination(), node, transport.getDuration()));
             }
             //END microbot variables
         }
-
 
         if (isBlocked(x, y, z)) {
             boolean westBlocked = isBlocked(x - 1, y, z);
@@ -182,10 +169,10 @@ public class CollisionMap {
                 final int lx = WorldPointUtil.unpackWorldX(neighborPacked);
                 final int ly = WorldPointUtil.unpackWorldY(neighborPacked);
                 final int lz = WorldPointUtil.unpackWorldPlane(neighborPacked);
-                if (!Objects.equals(target, new WorldPoint(lx, ly, lz))) {
+                if (targets.stream().noneMatch(tgts -> Objects.equals(tgts, new WorldPoint(lx, ly, lz)))) {
                     WorldPoint globalWorldPoint = Rs2WorldPoint.convertInstancedWorldPoint(new WorldPoint(lx, ly, lz));
                     if (globalWorldPoint != null) {
-                        TileObject go = Rs2GameObject.findGroundObjectByLocation(globalWorldPoint);
+                        TileObject go = Rs2GameObject.getGroundObject(globalWorldPoint);
                         if (go != null && go.getId() == 45340) {
                             continue;
                         }
@@ -199,7 +186,7 @@ public class CollisionMap {
                 // The transport starts from a blocked adjacent tile, e.g. fairy ring
                 // Only checks non-teleport transports (includes portals and levers, but not items and spells)
                 @SuppressWarnings("unchecked") // Casting EMPTY_LIST to List<Transport> is safe here
-                Set<Transport> neighborTransports = config.getTransportsPacked().getOrDefault(neighborPacked, (Set<Transport>) Collections.EMPTY_SET);
+                Set<Transport> neighborTransports = config.getTransportsPacked().getOrDefault(neighborPacked, (Set<Transport>)Collections.EMPTY_SET);
                 for (Transport transport : neighborTransports) {
                     if (transport.getOrigin() == null || visited.get(transport.getOrigin())) {
                         continue;

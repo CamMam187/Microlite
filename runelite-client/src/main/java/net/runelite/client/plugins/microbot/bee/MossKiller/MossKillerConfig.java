@@ -1,7 +1,9 @@
 package net.runelite.client.plugins.microbot.bee.MossKiller;
 
 import net.runelite.client.config.*;
+import net.runelite.client.plugins.microbot.bee.MossKiller.Enums.AttackStyle;
 import net.runelite.client.plugins.microbot.bee.MossKiller.Enums.CombatMode;
+import net.runelite.client.plugins.microbot.bee.MossKiller.Enums.GearEnums;
 
 @ConfigGroup(MossKillerConfig.configGroup)
 public interface MossKillerConfig extends Config {
@@ -25,19 +27,27 @@ public interface MossKillerConfig extends Config {
     )
     String advancedGuideSection = "advancedGuideSection";
 
+    @ConfigSection(
+            name = "Wildy Safing",
+            description = "Options specific to the safespot mode in wildy",
+            position = 3,
+            closedByDefault = true
+    )
+    String saferSection = "saferSection";
+
     @ConfigItem(
             keyName = "equipmentGuide",
             name = "Equipment Details",
             description = "List of required equipment.",
-            position = 1,
-            section = advancedGuideSection // Links this to the Advanced Guide section
+            position = 2,
+            section = advancedGuideSection
     )
     default String equipmentGuide() {
         return "1x Rune Chainbody\n"
                 + "1x Rune Scimitar\n"
                 + "(optional) 1x Bryophyta Staff (Uncharged)\n"
                 + "--\n"
-                + "EVERYTHING BELOW THIS POINT IS MINIMUM RECOMMENDED AMOUNTS, THE SCRIPT WILL STOP WHEN YOU RUN OUT OF SUPPLIES\n"
+                + "EVERYTHING BELOW THIS POINT IS MINIMUM RECOMMENDED AMOUNTS AS THE SCRIPT WILL STOP WHEN YOU RUN OUT OF SUPPLIES\n"
                 + "--\n"
                 + "10x Maple shortbow\n"
                 + "10x Maple longbow\n"
@@ -61,15 +71,15 @@ public interface MossKillerConfig extends Config {
             keyName = "instructionsGuide",
             name = "Instructions",
             description = "Advanced usage instructions for MossKiller.",
-            position = 0,
-            section = advancedGuideSection // Links this to the Advanced Guide section
+            position = 1,
+            section = advancedGuideSection
     )
     default String instructionsGuide() {
         return  "Select Wildy Mode.\n"
                 + "For the first run start the plugin near a bank in f2p with no armor or weapons and every listed piece of equipment in the bank.\n"
-                + "Turn on Teleportation spells in Web Walker configuration. Turn on Breakhandler. Turn on PK skull prevention in OSRS settings and have fixed mode enabled.\n"
+                + "Turn on Breakhandler. Have fixed mode enabled.\n"
                 + "Minimum required skill levels:\n"
-                + "- 40 Range\n"
+                + "- 30 Range\n"
                 + "- 41 Mage\n"
                 + "- 40 Attack\n"
                 + "- 40 Defense\n"
@@ -81,34 +91,155 @@ public interface MossKillerConfig extends Config {
                 + "This plugin will train your defense to 50 automatically";
     }
 
+    @ConfigItem(
+            keyName = "Filler",
+            name = "",
+            description = "filler text to differentiate the config",
+            position = 3,
+            section = saferSection
+    )
+    default String fillerTest() {
+        return  "         ↓↓↓ RANGED SETTINGS ↓↓↓";
+    }
+
+    @ConfigItem(
+            keyName = "instructionsForSafer",
+            name = "Instructions",
+            description = "Safer Mode instructions for MossKiller.",
+            position = 1,
+            section = saferSection
+    )
+    default String instructionsGuideSafer() {
+        return  "Select Wildy Safer Mode.\n"
+                + "Have fixed mode enabled.\n" +
+                "Turn on LiteMode in Player Monitor.\n" +
+                "Have AutoLogin Plugin enabled.\n" +
+                "Select your cape of choice in the drop down menu. Must have:\n" +
+                "2x Leather Boots \n" +
+                "2x Leather vambraces \n" +
+                "2x cape\n" +
+                "REQUIRED FOOD/CONSUMABLE ARE ***APPLE PIE***\n"
+                + "Minimum required skill levels for magic is level 13 Magic.\n"
+                + "Min Equipment for Magic mode:\n"
+                + "- 2x amulet of magic \n"
+                + "- 2x staff of fire \n"
+                + "Required skill levels for Ranged:\n"
+                + "- 30 Ranged\n"
+                + "Min Equipment for Ranged:\n"
+                + "- 2x maple Shortbow \n"
+                + "- Mithril Arrows (Edit Amount Below) \n"
+                + "----------------------\n"
+                + "If using ranged the rest of Ranged Equipment you must manually choose from dropdown menu (and have 2x of each).";
+    }
+
 
     @ConfigItem(
             keyName = "guide",
             name = "How to Use",
             description = "Basic usage instructions for MossKiller",
             position = 1,
-            section = basicGuideSection // Belongs to Basic Guide
+            section = basicGuideSection
     )
     default String GUIDE() {
         return "NORMAL: Have runes for teleport to Varrock, swordfish, and bronze axe in the bank. Start in Varrock East Bank. Turn off Teleportation spells in Web Walker configuration. Turn on Breakhandler.\n"
         + "ADVANCED: See Advanced Guide.\n"
-        + "TIPS: For tips with the plugin visit the Discord -> Community Plugins -> Moss Killer Plugin";
+        + "TIPS: For tips with the plugin visit the Microbot Discord -> Community Plugins -> Moss Killer Plugin";
     }
 
     @ConfigItem(
             keyName = "wildySelector",
             name = "Wildy Mode",
             description = "Enable this for killing Moss Giants in the Wilderness.",
-            position = 10
+            position = 0,
+            section = advancedGuideSection
     )
     default boolean wildy() {
         return false;
     }
 
     @ConfigItem(
+            keyName = "wildySaferSelector",
+            name = "Wildy Safer Mode",
+            description = "Enable this for killing Moss Giants in the Wilderness By Safing.",
+            position = 0,
+            section = saferSection
+    )
+    default boolean wildySafer() {
+        return false;
+    }
+
+
+    @ConfigItem(
+            keyName = "attackStyleSelector",
+            name = "Attack style",
+            description = "Select which attack style to use for wildy safespot",
+            position = 1,
+            section = saferSection
+    )
+    default AttackStyle attackStyle() {
+        return AttackStyle.MAGIC;
+    }
+
+    @ConfigItem(
+            keyName = "mithrilArrowAmount",
+            name = "Mithril Arrow Amount",
+            description = "Number of mithril arrows to use per trip if using Ranged",
+            position = 4,
+            section = saferSection
+    )
+    @Range(min = 1, max = 5000)  // This adds validation
+    default int mithrilArrowAmount() {
+        return 500;
+    }
+
+    @ConfigItem(
+            keyName = "rangedAmulet",
+            name = "Amulet",
+            description = "Select which amulet to use for ranging",
+            position = 5,
+            section = saferSection
+    )
+    default GearEnums.RangedAmulet rangedAmulet() {
+        return GearEnums.RangedAmulet.POWER;
+    }
+
+    @ConfigItem(
+            keyName = "rangedTorso",
+            name = "Torso",
+            description = "Select which body armor to use for ranging",
+            position = 6,
+            section = saferSection
+    )
+    default GearEnums.RangedTorso rangedTorso() {
+        return GearEnums.RangedTorso.STUDDED;
+    }
+
+    @ConfigItem(
+            keyName = "rangedChaps",
+            name = "Chaps",
+            description = "Select which leg armor to use for ranging",
+            position = 6,
+            section = saferSection
+    )
+    default GearEnums.RangedChaps rangedChaps() {
+        return GearEnums.RangedChaps.STUDDED;
+    }
+
+    @ConfigItem(
+            keyName = "cape",
+            name = "Cape",
+            description = "Select which cape to use (for both magic and ranging) - you must have a cape",
+            position = 2,
+            section = saferSection
+    )
+    default GearEnums.Cape cape() {
+        return GearEnums.Cape.ORANGE_CAPE;
+    }
+
+    @ConfigItem(
             keyName = "combatMode",
             name = "Combat Mode",
-            description = "Select the combat mode: Flee, Fight, or Lure (Currently only Fight)",
+            description = "Select the combat mode: Flee, Fight, or Lure (Currently only Fight Supported)",
             position = 3,
             section = advancedGuideSection
     )
@@ -121,7 +252,7 @@ public interface MossKillerConfig extends Config {
             keyName = "hideOverlay",
             name = "Overlay Hider",
             description = "Select this if you want to hide the overlay",
-            position = 7
+            position = 10
     )
     default boolean isHideOverlay() {
         return false;
@@ -132,7 +263,7 @@ public interface MossKillerConfig extends Config {
             keyName = "buryBones",
             name = "Bury Bones",
             description = "Select this if you want to bury bones",
-            position = 9
+            position = 8
     )
     default boolean buryBones() {
         return false;
@@ -142,7 +273,7 @@ public interface MossKillerConfig extends Config {
             keyName = "alchLoot",
             name = "Alch loot",
             description = "Select this if you want to loot alchables and alch them and loot coins",
-            position = 8
+            position = 9
     )
     default boolean alchLoot() {
         return false;
@@ -152,21 +283,17 @@ public interface MossKillerConfig extends Config {
             keyName = "forceDefensive",
             name = "Force Defensive",
             description = "Select this if you want to autocast defensive after 50 Defence.",
-            position = 5,
-            section = advancedGuideSection
+            position = 5
     )
     default boolean forceDefensive() {
         return false;
     }
 
-    // -------------------------------------------
-// Configuration Items (Under Basic Guide)
-// -------------------------------------------
     @ConfigItem(
             keyName = "keyThreshold",
             name = "Key Threshold",
             description = "How many Mossy Keys should be collected before killing the boss.",
-            position = 8,
+            position = 7,
             section = basicGuideSection
     )
     default int keyThreshold() {
@@ -214,7 +341,7 @@ public interface MossKillerConfig extends Config {
             name = "Hop Worlds When Players Near",
             description = "Hop worlds when players are near you fighting Moss Giants.",
             position = 6,
-            section = basicGuideSection // Belongs to Basic Guide
+            section = basicGuideSection
     )
     default boolean hopWhenPlayerIsNear() {
         return true;
@@ -224,11 +351,65 @@ public interface MossKillerConfig extends Config {
             keyName = "isSlashWeaponEquipped",
             name = "Slash Weapon Equipped?",
             description = "Do you have a slash weapon equipped for spider's web? If False, have a knife in the bank.",
-            position = 7,
-            section = basicGuideSection // Belongs to Basic Guide
+            position = 6,
+            section = basicGuideSection
     )
     default boolean isSlashWeaponEquipped() {
         return true;
     }
+
+    @ConfigSection(
+            name = "Scheduler Configurations",
+            description = "Configuration options for scheduled behavior",
+            position = 4, // Ensure this is below all existing positions
+            closedByDefault = true
+    )
+    String schedulerSection = "schedulerSection";
+
+    @ConfigItem(
+            keyName = "selectedOutfit",
+            name = "Selected Outfit",
+            description = "Choose the default outfit type.",
+            position = 1,
+            section = schedulerSection
+    )
+    default OutfitHelper.OutfitType selectedOutfit() {
+        return OutfitHelper.OutfitType.FULL_RUNE_CHAIN;
+    }
+
+    @ConfigItem(
+            keyName = "customWeapon",
+            name = "Custom Weapon",
+            description = "Optional weapon override (leave empty for default).",
+            position = 2,
+            section = schedulerSection
+    )
+    default String customWeapon() {
+        return "Rune scimitar";
+    }
+
+    @ConfigItem(
+            keyName = "includeHelmet",
+            name = "Include Helmet?",
+            description = "Toggle whether a helmet should be worn.",
+            position = 3,
+            section = schedulerSection
+    )
+    default boolean includeHelmet() {
+        return true;
+    }
+
+    @ConfigItem(
+            keyName = "capePreference",
+            name = "Cape Preference",
+            description = "Select the cape you want your character to wear",
+            position = 4,
+            section = schedulerSection
+    )
+    default GearEnums.Cape capePreference() {
+        return GearEnums.Cape.TEAM_CAPE_50; // default
+    }
+
+
 
 }

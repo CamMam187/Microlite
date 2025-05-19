@@ -232,4 +232,8 @@ public final class ParamID
 	public static final int SPELL_BUTTON = 596;
 	public static final int SPELL_NAME = 601;
 	public static final int SPELL_LEVELREQ = 604;
+
+	public static final int BANK_AUTOCHARGE = 2257;
+
+	public static final int CLUE_SCROLL = 623;
 }

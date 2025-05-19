@@ -20,7 +20,10 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
+
+import static net.runelite.api.Perspective.LOCAL_TILE_SIZE;
 
 public class Rs2Npc {
     /**
@@ -83,19 +86,31 @@ public class Rs2Npc {
     }
 
     /**
+     * Checks if the NPC is currently moving based on its pose animation.
+     * An NPC is considered moving if its pose animation is different from its idle pose animation.
+     *
+     * @param npc The NPC to check.
+     * @return {@code true} if the NPC is moving, {@code false} if it is idle.
+     */
+    public static boolean isMoving(NPC npc) {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                npc.getPoseAnimation() != npc.getIdlePoseAnimation()
+        ).orElse(false);
+    }
+
+    /**
      * Retrieves a list of NPCs currently interacting with the local player.
      *
      * @return A sorted list of {@link NPC} objects interacting with the local player.
-     * @deprecated Since 1.7.2, use {@link #getNpcsForPlayer(Predicate)} for better integration with {@link Rs2NpcModel}.
      */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static List<NPC> getNpcsForPlayer() {
-        return Microbot.getClient().getNpcs().stream()
-                .filter(x -> x.getInteracting() == Microbot.getClient().getLocalPlayer())
+    public static Stream<Rs2NpcModel> getNpcsForPlayer() {
+        List<Rs2NpcModel> npcs = getNpcs(x -> x.getInteracting() == Microbot.getClient().getLocalPlayer())
                 .sorted(Comparator.comparingInt(value ->
                         value.getLocalLocation().distanceTo(
                                 Microbot.getClient().getLocalPlayer().getLocalLocation())))
                 .collect(Collectors.toList());
+
+        return npcs.stream();
     }
 
     /**
@@ -178,28 +193,6 @@ public class Rs2Npc {
     }
 
     /**
-     * Retrieves a stream of NPCs filtered by their death status.
-     *
-     * <p>This method filters NPCs based on whether they are dead or alive.</p>
-     *
-     * @param isDead {@code true} to retrieve only dead NPCs, {@code false} to retrieve only alive NPCs.
-     * @return A sorted {@link Stream} of {@link NPC} objects that match the specified death status.
-     * @deprecated Since 1.7.2 - Use {@link #getNpcs(Predicate)} for more flexible filtering.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static Stream<NPC> getNpcs(boolean isDead) {
-        List<NPC> npcList = Microbot.getClientThread().runOnClientThread(() ->
-                Microbot.getClient().getTopLevelWorldView().npcs().stream()
-                        .filter(Objects::nonNull)
-                        .filter(x -> x.getName() != null && isDead == x.isDead())
-                        .sorted(Comparator.comparingInt(value -> value.getLocalLocation().distanceTo(Microbot.getClient().getLocalPlayer().getLocalLocation())))
-                        .collect(Collectors.toList())
-        );
-
-        return npcList.stream();
-    }
-
-    /**
      * Retrieves a stream of NPCs filtered by a given condition.
      *
      * <p>This method filters NPCs based on the specified predicate, allowing for flexible
@@ -209,13 +202,14 @@ public class Rs2Npc {
      * @return A sorted {@link Stream} of {@link Rs2NpcModel} objects that match the given predicate.
      */
     public static Stream<Rs2NpcModel> getNpcs(Predicate<Rs2NpcModel> predicate) {
-        List<Rs2NpcModel> npcList = Microbot.getClientThread().runOnClientThread(() -> Microbot.getClient().getTopLevelWorldView().npcs().stream()
+        List<Rs2NpcModel> npcList = Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient().getTopLevelWorldView().npcs().stream()
                 .filter(Objects::nonNull)
                 .map(Rs2NpcModel::new)
                 .filter(predicate)
                 .filter(x -> x.getName() != null)
                 .sorted(Comparator.comparingInt(value -> value.getLocalLocation().distanceTo(Microbot.getClient().getLocalPlayer().getLocalLocation())))
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList()))
+                .orElse(new ArrayList<>());
 
         return npcList.stream();
     }
@@ -490,6 +484,11 @@ public class Rs2Npc {
             List<String> baseActions = baseComposition != null ? Arrays.asList(baseComposition.getActions()) : Collections.emptyList();
             List<String> transformedActions = transformedComposition != null ? Arrays.asList(transformedComposition.getActions()) : Collections.emptyList();
 
+            // Exception, hunters guild npc requires 46 hunter in-order to access
+            if (Objects.equals(npc.getWorldLocation(), new WorldPoint(1542, 3041, 0))) {
+                return Rs2Player.getSkillRequirement(Skill.HUNTER, 46, false);
+            }
+
             return baseActions.contains("Bank") || transformedActions.contains("Bank");
         }).findFirst().orElse(null);
     }
@@ -505,8 +504,10 @@ public class Rs2Npc {
      * @return {@code true} if the NPC has the specified action, {@code false} otherwise.
      */
     public static boolean hasAction(int id, String action) {
-        NPCComposition npcComposition = Microbot.getClientThread().runOnClientThread(() ->
-                Microbot.getClient().getNpcDefinition(id));
+        NPCComposition npcComposition = Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient().getNpcDefinition(id)).orElse(null);
+
+        if (npcComposition == null) return false;
 
         return Arrays.stream(npcComposition.getActions())
                 .anyMatch(x -> x != null && x.equalsIgnoreCase(action));
@@ -544,12 +545,12 @@ public class Rs2Npc {
      * @param action The action to perform on the NPC (e.g., "Talk-to", "Attack", "Trade").
      * @return {@code true} if the interaction was successfully executed, {@code false} if the NPC was unreachable.
      */
+
     public static boolean interact(Rs2NpcModel npc, String action) {
         if (npc == null) return false;
+
         Microbot.status = action + " " + npc.getName();
         try {
-
-            // Handling unreachable NPC detection
             if (Microbot.isCantReachTargetDetectionEnabled && Microbot.cantReachTarget) {
                 if (!hasLineOfSight(npc)) {
                     if (Microbot.cantReachTargetRetries >= Rs2Random.between(3, 5)) {
@@ -569,33 +570,63 @@ public class Rs2Npc {
                 }
             }
 
-            // Fetch NPC composition
-            NPCComposition npcComposition = Microbot.getClientThread().runOnClientThread(() -> Microbot.getClient().getNpcDefinition(npc.getId()));
+            NPCComposition npcComposition = Microbot.getClientThread().runOnClientThreadOptional(
+                    () -> Microbot.getClient().getNpcDefinition(npc.getId())).orElse(null);
 
-            // Determine action index in NPC's menu
-            int index = 0;
-            for (int i = 0; i < npcComposition.getActions().length; i++) {
-                String npcAction = npcComposition.getActions()[i];
-                if (npcAction == null || !npcAction.equalsIgnoreCase(action)) continue;
-                index = i;
+            if (npcComposition == null || npcComposition.getActions() == null) {
+                Microbot.log("Error: Could not get NPC composition or actions for NPC: " + npc.getName());
+                return false;
             }
 
-            // Retrieve the corresponding menu action
+            int index = -1;
+            String[] actions = npcComposition.getActions();
+
+            if (action == null || action.isEmpty()) {
+                OptionalInt optionalIndex = IntStream.range(0, actions.length)
+                        .filter(i -> actions[i] != null && !actions[i].isEmpty())
+                        .findFirst();
+
+                if (optionalIndex.isPresent()) {
+                    index = optionalIndex.getAsInt();
+                    action = actions[index];
+                }
+            }
+            else {
+                String finalAction = action;
+                OptionalInt optionalIndex = IntStream.range(0, actions.length)
+                        .filter(i -> actions[i] != null && actions[i].equalsIgnoreCase(finalAction))
+                        .findFirst();
+
+                if (optionalIndex.isPresent()) {
+                    index = optionalIndex.getAsInt();
+                }
+            }
+
             MenuAction menuAction = getMenuAction(index);
 
-            // Execute the interaction
-            if (menuAction != null) {
-                Microbot.doInvoke(new NewMenuEntry(0, 0, menuAction.getId(), npc.getIndex(), -1, npc.getName(), npc), Rs2UiHelper.getActorClickbox(npc));
+            if (menuAction == null) {
+                if (index == -1 && !Microbot.getClient().isWidgetSelected()) {
+                    Microbot.log("Error: Action '" + action + "' not found for NPC: " + npc.getName());
+                } else {
+                    Microbot.log("Error: Could not get menu action for action '" + action + "' on NPC: " + npc.getName());
+                }
+                return false;
             }
 
+            if (!Rs2Camera.isTileOnScreen(npc.getLocalLocation())) {
+                Rs2Camera.turnTo(npc);
+            }
+
+            Microbot.doInvoke(new NewMenuEntry(0, 0, menuAction.getId(), npc.getIndex(), -1, npc.getName(), npc),
+                    Rs2UiHelper.getActorClickbox(npc));
+            return true;
+
         } catch (Exception ex) {
-            Microbot.log(ex.getMessage());
+            Microbot.log("Error interacting with NPC '" + npc.getName() + "' for action '" + action + "': " + ex.getMessage());
             ex.printStackTrace();
+            return false;
         }
-
-        return true;
     }
-
     /**
      * Retrieves the corresponding {@link MenuAction} for a given interaction index.
      *
@@ -790,6 +821,7 @@ public class Rs2Npc {
             if (Rs2Combat.inCombat()) continue;
             if (npc.isInteracting() && npc.getInteracting() != Microbot.getClient().getLocalPlayer() && !Rs2Player.isInMulti())
                 continue;
+            if (npc.isDead()) continue;
 
             return interact(npc, "attack");
         }
@@ -1084,6 +1116,31 @@ public class Rs2Npc {
     }
 
     /**
+     * Retrieves the first valid action from the given list that the NPC supports.
+     *
+     * @param npc             The {@link Rs2NpcModel} to check available actions on.
+     * @param possibleActions A list of possible actions to match against the NPC's menu options.
+     * @return The first matching action as a {@link String}, or an empty string if no match is found.
+     */
+    public static String getAvailableAction(Rs2NpcModel npc, List<String> possibleActions) {
+        if (npc == null || possibleActions == null || possibleActions.isEmpty()) return "";
+
+        NPCComposition composition = Microbot.getClientThread().runOnClientThreadOptional(
+                        () -> Microbot.getClient().getNpcDefinition(npc.getId()))
+                .orElse(null);
+
+        if (composition == null || composition.getActions() == null) return "";
+
+        return Arrays.stream(composition.getActions())
+                .filter(Objects::nonNull)
+                .filter(npcAction ->
+                        possibleActions.stream()
+                                .anyMatch(action -> action.equalsIgnoreCase(npcAction)))
+                .findFirst()
+                .orElse("");
+    }
+
+    /**
      * Retrieves the first NPC that has a specified action available.
      *
      * <p>This method searches for NPCs that have the given action in their interaction menu.
@@ -1159,5 +1216,46 @@ public class Rs2Npc {
     // Walks to the nearest NPC location with the given name
     public static boolean walkToNearestMonster(String name) {
         return walkToNearestMonster(name, 1, false);
+    }
+
+    /**
+     * Determines whether the specified NPC is within the player's current attack range.
+     * <p>
+     * This method will return {@code false} if the NPC or the player's local location
+     * cannot be determined. The effective attack range is calculated by
+     * {@link Rs2Combat#getAttackRange(boolean, boolean)}, taking into account
+     * manual-cast weapons and/or special attacks as specified.
+     *
+     * @param npc                  the target NPC model; may be {@code null}
+     * @param includeManualCast    if {@code true}, include any manual-cast attack range (e.g., magic spells)
+     * @param includeSpecialAttack if {@code true}, include any special-attack range
+     * @return {@code true} if both locations are known and the tile distance between player
+     *         and NPC (using LOCAL_TILE_SIZE) is less than or equal to the computed attack range;
+     *         {@code false} otherwise
+     */
+    public static boolean isInAttackRange(Rs2NpcModel npc, boolean includeManualCast, boolean includeSpecialAttack) {
+        if (npc == null) return false;
+
+        LocalPoint playerLocal = Microbot.getClient().getLocalPlayer().getLocalLocation();
+        LocalPoint npcLocal = npc.getLocalLocation();
+
+        if (npcLocal == null || playerLocal == null) return false;
+
+        int distanceInTiles = playerLocal.distanceTo(npcLocal) / LOCAL_TILE_SIZE;
+        int attackRange = Rs2Combat.getAttackRange(includeManualCast, includeSpecialAttack);
+
+        return distanceInTiles <= attackRange;
+    }
+
+    /**
+     * Determines whether the specified NPC is within the player's basic attack range,
+     * without considering manual-cast weapons or special attacks.
+     *
+     * @param npc the target NPC model; may be {@code null}
+     * @return {@code true} if the NPC is within the default attack range, {@code false} otherwise
+     * @see #isInAttackRange(Rs2NpcModel, boolean, boolean)
+     */
+    public static boolean isInAttackRange(Rs2NpcModel npc) {
+        return isInAttackRange(npc, false, false);
     }
 }

@@ -12,9 +12,15 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.PluginInstantiationException;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.bee.MossKiller.Enums.CombatMode;
+import net.runelite.client.plugins.microbot.pluginscheduler.api.SchedulablePlugin;
+import net.runelite.client.plugins.microbot.pluginscheduler.condition.logical.LockCondition;
+import net.runelite.client.plugins.microbot.pluginscheduler.condition.logical.LogicalCondition;
+import net.runelite.client.plugins.microbot.pluginscheduler.event.PluginScheduleEntrySoftStopEvent;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.player.Rs2PlayerModel;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
@@ -24,6 +30,9 @@ import javax.inject.Inject;
 import java.awt.*;
 import java.util.List;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static net.runelite.api.EquipmentInventorySlot.WEAPON;
 import static net.runelite.api.GraphicID.SNARE;
@@ -38,9 +47,10 @@ import static net.runelite.api.ItemID.RUNE_SCIMITAR;
         enabledByDefault = false
 )
 @Slf4j
-public class MossKillerPlugin extends Plugin {
+public class MossKillerPlugin extends Plugin implements SchedulablePlugin {
     @Inject
     private MossKillerConfig config;
+
     @Provides
     MossKillerConfig provideConfig(ConfigManager configManager) {
         return configManager.getConfig(MossKillerConfig.class);
@@ -55,8 +65,9 @@ public class MossKillerPlugin extends Plugin {
     @Inject
     private WildyKillerScript wildyKillerScript;
     @Inject
+    private WildySaferScript wildySaferScript;
+    @Inject
     private MossKillerScript exampleScript;
-
     private boolean worldHopFlag = false;
     @Getter
     private int deathCounter = 0;
@@ -80,13 +91,20 @@ public class MossKillerPlugin extends Plugin {
     private boolean useMelee = false;
     private boolean useRange = false;
 
+
+    private int consecutiveHitsplatsMain = 0;
+    private int consecutiveHitsplatsSafeSpot1 = 0;
+    private long lastHitsplatTimeMain = 0;
+    private long lastHitsplatTimeSafeSpot1 = 0;
+    private static final long CONSECUTIVE_HITSPLAT_TIMEOUT = 3000; //
+
     private boolean runeScimitar = false;
 
     private final Object targetLock = new Object();
     public Rs2PlayerModel currentTarget = null;
 
     private boolean hideOverlay;
-
+    public boolean dead = false;
     @Getter
     private boolean defensive;
 
@@ -104,7 +122,7 @@ public class MossKillerPlugin extends Plugin {
 
 
     @Override
-    protected void startUp() throws AWTException {
+    protected void startUp() throws AWTException, PluginInstantiationException {
         if (overlayManager != null) {
             overlayManager.add(mossKillerOverlay);
         }
@@ -112,25 +130,46 @@ public class MossKillerPlugin extends Plugin {
         Microbot.enableAutoRunOn = false;
         hideOverlay = config.isHideOverlay();
         toggleOverlay(hideOverlay);
-        if(!config.wildy()) {
-        exampleScript.run(config);
-        } else {wildyKillerScript.run(config);
-        wildyKillerScript.handleAsynchWalk("Start-up");
-    }
+        if (!config.wildy() && !config.wildySafer()) {
+            exampleScript.run(config);
+        }
+        if (config.wildy() && !config.wildySafer()) {
+            wildyKillerScript.run(config);
+            wildyKillerScript.handleAsynchWalk("Start-up");
+        }
+        if (config.wildySafer() && !config.wildy()) {
+            wildySaferScript.run(config);
+            System.out.println("running wildy safer script");
+        }
     }
 
     public Rs2PlayerModel getCurrentTarget() {
-        synchronized(targetLock) {
+        synchronized (targetLock) {
             return currentTarget;
         }
     }
 
     public void setCurrentTarget(Rs2PlayerModel target) {
-        synchronized(targetLock) {
+        synchronized (targetLock) {
             currentTarget = target;
             System.out.println("Target set to: " + (target != null ? target.getName() : "null"));
         }
     }
+
+    @Subscribe
+    public void onActorDeath(ActorDeath actorDeath) {
+        if (actorDeath.getActor() == Microbot.getClient().getLocalPlayer()) {
+            if (!dead) type();
+        }
+    }
+
+    private void type() {
+        Rs2Keyboard.typeString("gg");
+        Rs2Keyboard.enter();
+        dead = true;
+    }
+
+    public LockCondition lockCondition = new LockCondition("doing bryoboss");
 
     @Subscribe
     public void onConfigChanged(final ConfigChanged event) {
@@ -148,10 +187,11 @@ public class MossKillerPlugin extends Plugin {
 
     @Subscribe
     public void onVarbitChanged(VarbitChanged event) {
-        if (config.wildy()) {if (event.getVarbitId() == Varbits.TELEBLOCK) {
-            int teleblockValue = event.getValue(); // Get the current value of the teleblock varbit
-            isTeleblocked = teleblockValue > 100;
-        }
+        if (config.wildy()) {
+            if (event.getVarbitId() == Varbits.TELEBLOCK) {
+                int teleblockValue = event.getValue(); // Get the current value of the teleblock varbit
+                isTeleblocked = teleblockValue > 100;
+            }
         }
     }
 
@@ -173,7 +213,7 @@ public class MossKillerPlugin extends Plugin {
             boolean hasOverlay = overlayManager.anyMatch(ov -> ov.getName().equalsIgnoreCase(MossKillerOverlay.class.getSimpleName()));
 
             if (hideOverlay) {
-                if(!hasOverlay) return;
+                if (!hasOverlay) return;
 
                 overlayManager.remove(mossKillerOverlay);
             } else {
@@ -185,7 +225,8 @@ public class MossKillerPlugin extends Plugin {
     }
 
     public void resetTarget() {
-        currentTarget = null;}
+        currentTarget = null;
+    }
 
     public boolean hasRuneScimitar() {
         return runeScimitar;
@@ -325,7 +366,6 @@ public class MossKillerPlugin extends Plugin {
                     superNullTarget = true;
                     //System.out.println("9 ticks elapsed. target probably properly gone.");
                 }
-
             } else {
                 superNullTarget = false;
             }
@@ -343,12 +383,18 @@ public class MossKillerPlugin extends Plugin {
             }
         }
 
-        if (!config.wildy()){NPC bryophyta = findBryophyta();
+        if (!config.wildy() && !config.wildySafer()) {
+            NPC bryophyta = findBryophyta();
 
-        // Check if Bryophyta's HP is 0
-        if (bryophyta != null && bryophyta.getHealthRatio() == 0) {
-            bryoTile = getBryophytaWorldLocation(bryophyta);
-        }}
+            // Check if Bryophyta's HP is 0
+            if (bryophyta != null && bryophyta.getHealthRatio() == 0) {
+                bryoTile = getBryophytaWorldLocation(bryophyta);
+            }
+        }
+
+        if (config.wildySafer() && !wildySaferScript.fired) {
+            wildySaferScript.checkCombatAndRunToBank();
+        }
     }
 
     public NPC findBryophyta() {
@@ -372,7 +418,7 @@ public class MossKillerPlugin extends Plugin {
     }
 
     private void trackAttackers() {
-        Player localPlayer =Microbot.getClient().getLocalPlayer();
+        Player localPlayer = Microbot.getClient().getLocalPlayer();
 
         // Check if a Moss Giant is interacting with the player
         Actor interactingActor = localPlayer.getInteracting();
@@ -437,7 +483,6 @@ public class MossKillerPlugin extends Plugin {
 
             System.out.println("Processing " + player.getName() + " with count " + tickCount);
 
-            // Follow your original logic closely
             // Increment tick count if the player is interacting and performing combat animation
             if (player.getInteracting() == localPlayer && !isNonCombatAnimation(player)) {
                 tickCount += 1;
@@ -466,7 +511,7 @@ public class MossKillerPlugin extends Plugin {
                 System.out.println(player.getName() + " non-combat animation, ticks now: " + tickCount);
             }
 
-            System.out.println("Final tick count for " + player.getName() + ": " + tickCount);
+            Microbot.log("Final tick count for " + player.getName() + ": " + tickCount);
 
             // If tick count is >= MIN_TICKS_TO_TRACK, they become your target
             if (tickCount >= MIN_TICKS_TO_TRACK) {
@@ -478,10 +523,11 @@ public class MossKillerPlugin extends Plugin {
             // If tick count is 0, remove player from the map
             if (tickCount == 0) {
                 attackerTickMap.remove(player);
-                System.out.println("Removing " + player.getName() + " from map due to 0 ticks");
+                Microbot.log("Removing " + player.getName() + " from map due to 0 ticks");
                 if (currentTarget == player) {
                     resetTarget();
-                    System.out.println("Resetting target since it was " + player.getName());
+                    if (Rs2Player.getWorldLocation().getY() > 3675) wildyKillerScript.handleAsynchWalk("Twenty Wild"); Microbot.log("target has been reset, going twenty wild for safety");
+                    Microbot.log("Resetting target since it was " + player.getName());
                 }
             }
         }
@@ -514,9 +560,9 @@ public class MossKillerPlugin extends Plugin {
 
         return player.getCombatLevel() > COMBAT_THRESHOLD;
     }
+
     /**
      * Determines if a player is performing a non-combat animation (walking/running).
-
      */
     private boolean isNonCombatAnimation(Player player) {
         int animationId = player.getAnimation();
@@ -576,6 +622,35 @@ public class MossKillerPlugin extends Plugin {
 
     @Subscribe
     public void onHitsplatApplied(HitsplatApplied event) {
+        Actor target = event.getActor();
+        Hitsplat hitsplat = event.getHitsplat();
+
+        if (config.wildySafer()) {
+            // SafeSpot logic
+            if (wildySaferScript.isAtSafeSpot()) {
+                if (target == client.getLocalPlayer()) {
+                    long currentTime = System.currentTimeMillis();
+
+                    // Debug to see what's happening
+                    System.out.println("Hit registered at safespot, count: " + consecutiveHitsplatsMain);
+                            System.out.println("*** SETTING MOVE TO TRUE ***");
+                            wildySaferScript.move = true;
+                            consecutiveHitsplatsMain = 0; // Reset counter
+
+                        // Update the last hitsplat time
+                        lastHitsplatTimeMain = currentTime;
+                    }
+
+                if (target == client.getLocalPlayer()){
+                    if (wildySaferScript.iveMoved && wildySaferScript.isAtSafeSpot1()) {
+                            System.out.println("*** SETTING SAFESPOT1ATTACK TO TRUE ***");
+                            wildySaferScript.safeSpot1Attack = true;
+                        System.out.println("*** you've been hit while at safespot1 ***");
+                        }
+                    }
+
+                }
+                }
 
         if(config.wildy()) {
 
@@ -583,8 +658,6 @@ public class MossKillerPlugin extends Plugin {
             wildyKillerScript.hitsplatApplied = event.getHitsplat().isMine();
         }
 
-        Actor target = event.getActor();
-        Hitsplat hitsplat = event.getHitsplat();
 
         if (target == Microbot.getClient().getLocalPlayer()) {
             if (hitsplat.getHitsplatType() == HitsplatID.BLOCK_ME || hitsplat.getHitsplatType() == HitsplatID.DAMAGE_ME) {
@@ -669,9 +742,53 @@ public class MossKillerPlugin extends Plugin {
         return isSnared;
     }
 
+    public boolean preparingForShutdown = false;
+
+    @Override
+    public LogicalCondition getStopCondition() {
+        return null;
+    }
+
+    @Override
+    @Subscribe
+    public void onPluginScheduleEntrySoftStopEvent(PluginScheduleEntrySoftStopEvent event) {
+
+        if (event.getPlugin() == this) {
+            // Set a flag to indicate preparation for shutdown
+            preparingForShutdown = true;
+
+            // Schedule the actual shutdown after a 1-minute delay
+            ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+            executor.schedule(() -> {
+                Microbot.getClientThread().invokeLater(() -> {
+                    try {
+                        Microbot.getPluginManager().setPluginEnabled(this, false);
+                        Microbot.stopPlugin(this);
+                    } catch (Exception e) {
+                        log.error("Error stopping plugin", e);
+                    }
+                });
+                executor.shutdown();
+            }, 1, TimeUnit.MINUTES);
+        }
+    }
+
+    public boolean startedFromScheduler = false;
+
+    @Override
+    public LogicalCondition getStartCondition() {
+        startedFromScheduler = true;
+        // Create conditions that determine when your plugin can start
+        // Return null if the plugin can start anytime
+        return null;
+    }
+
     protected void shutDown() {
         exampleScript.shutdown();
         wildyKillerScript.shutdown();
+        wildySaferScript.shutdown();
+        startedFromScheduler = false;
+        preparingForShutdown = false;
         overlayManager.remove(mossKillerOverlay);
         }
     }

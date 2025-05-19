@@ -56,10 +56,28 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.Value;
+import net.runelite.api.Client;
+import net.runelite.api.GameState;
+import net.runelite.api.ItemComposition;
+import net.runelite.api.KeyCode;
 import net.runelite.api.Menu;
-import net.runelite.api.*;
+import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
+import net.runelite.api.Tile;
+import net.runelite.api.TileItem;
+import static net.runelite.api.TileItem.OWNERSHIP_GROUP;
+import static net.runelite.api.TileItem.OWNERSHIP_OTHER;
+import static net.runelite.api.TileItem.OWNERSHIP_SELF;
 import net.runelite.api.coords.WorldPoint;
-import net.runelite.api.events.*;
+import net.runelite.api.events.ClientTick;
+import net.runelite.api.events.FocusChanged;
+import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.ItemDespawned;
+import net.runelite.api.events.ItemQuantityChanged;
+import net.runelite.api.events.ItemSpawned;
+import net.runelite.api.events.MenuEntryAdded;
+import net.runelite.api.gameval.ItemID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.Notifier;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -105,7 +123,8 @@ import static net.runelite.client.plugins.grounditems.config.MenuHighlightMode.*
 @PluginDescriptor(
 	name = "Ground Items",
 	description = "Highlight ground items and/or show price information",
-	tags = {"grand", "exchange", "high", "alchemy", "prices", "highlight", "overlay", "lootbeam"}
+	tags = {"grand", "exchange", "high", "alchemy", "prices", "highlight", "overlay", "lootbeam"},
+	alwaysOn = true
 )
 public class GroundItemsPlugin extends Plugin
 {
@@ -119,7 +138,7 @@ public class GroundItemsPlugin extends Plugin
 	}
 
 	// ItemID for coins
-	private static final int COINS = ItemID.COINS_995;
+	private static final int COINS = ItemID.COINS;
 
 	@Getter(AccessLevel.PACKAGE)
 	@Setter(AccessLevel.PACKAGE)
@@ -284,7 +303,7 @@ public class GroundItemsPlugin extends Plugin
 			collectedGroundItems.put(tile.getWorldLocation(), item.getId(), groundItem);
 		}
 
-		if (shouldDisplayItem(config.ownershipFilterMode(), groundItem.getOwnership(), client.getVarbitValue(Varbits.ACCOUNT_TYPE)))
+		if (shouldDisplayItem(config.ownershipFilterMode(), groundItem.getOwnership(), client.getVarbitValue(VarbitID.IRONMAN)))
 		{
 			notifyHighlightedItem(groundItem);
 		}
@@ -764,7 +783,7 @@ public class GroundItemsPlugin extends Plugin
 		GroundItem highestItem = null;
 		Collection<GroundItem> groundItems = collectedGroundItems.row(worldPoint).values();
 		final OwnershipFilterMode ownershipFilterMode = config.ownershipFilterMode();
-		final int accountType = client.getVarbitValue(Varbits.ACCOUNT_TYPE);
+		final int accountType = client.getVarbitValue(VarbitID.IRONMAN);
 		for (GroundItem groundItem : groundItems)
 		{
 			if (!shouldDisplayItem(ownershipFilterMode, groundItem.getOwnership(), accountType))

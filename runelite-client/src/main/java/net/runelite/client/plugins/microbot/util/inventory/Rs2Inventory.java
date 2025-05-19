@@ -18,6 +18,7 @@ import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Potion;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
+import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
 import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
@@ -59,8 +60,11 @@ public class Rs2Inventory {
             for (int i = 0; i < e.getItemContainer().getItems().length; i++) {
                 Item item = inventory().getItems()[i];
                 if (item.getId() == -1) continue;
-                ItemComposition itemComposition = Microbot.getClientThread().runOnClientThread(() -> Microbot.getClient().getItemDefinition(item.getId()));
-                _inventoryItems.add(new Rs2ItemModel(item, itemComposition, i));
+                ItemComposition itemComposition = Microbot.getClientThread().runOnClientThreadOptional(() ->
+                        Microbot.getClient().getItemDefinition(item.getId())).orElse(null);
+                if (itemComposition != null) {
+                    _inventoryItems.add(new Rs2ItemModel(item, itemComposition, i));
+                }
             }
             inventoryItems = _inventoryItems;
         }
@@ -688,8 +692,8 @@ public class Rs2Inventory {
                 new ArrayList<>(items())) {
             if (item == null) continue;
             if (ignoreItems.stream().anyMatch(x -> x.equalsIgnoreCase(item.name))) continue;
-            long totalPrice = (long) Microbot.getClientThread().runOnClientThread(() ->
-                    Microbot.getItemManager().getItemPrice(item.id) * item.quantity);
+            long totalPrice = (long) Microbot.getClientThread().runOnClientThreadOptional(() ->
+                    Microbot.getItemManager().getItemPrice(item.id) * item.quantity).orElse(0);
             if (totalPrice >= gpValue) continue;
 
             invokeMenu(item, "Drop");
@@ -1323,6 +1327,20 @@ public class Rs2Inventory {
         Rs2ItemModel rs2Item = items().stream().filter(x -> x.id == id).findFirst().orElse(null);
         if (rs2Item == null) return false;
         invokeMenu(rs2Item, action);
+        return true;
+    }
+    /**
+     * Interacts with an item with the specified ID in the inventory using the specified action.
+     *
+     * @param id     The ID of the item to interact with.
+     * @param action The action to perform on the item.
+     *
+     * @return True if the interaction was successful, false otherwise.
+     */
+    public static boolean interact(int id, String action, int identifier) {
+        Rs2ItemModel rs2Item = items().stream().filter(x -> x.id == id).findFirst().orElse(null);
+        if (rs2Item == null) return false;
+        invokeMenu(rs2Item, action, identifier);
         return true;
     }
 
@@ -1996,13 +2014,24 @@ public class Rs2Inventory {
      * @param Npc
      *
      * @return
+     * @deprecated since 1.8.6, forRemoval = true {@link #useItemOnNpc(int, Rs2NpcModel)}
      */
+    @Deprecated(since = "1.8.6" , forRemoval = true)
     public static boolean useItemOnNpc(int itemId, NPC Npc) {
         if (Rs2Bank.isOpen()) return false;
         use(itemId);
         sleep(100);
         if (!isItemSelected()) return false;
         Rs2Npc.interact(Npc);
+        return true;
+    }
+
+    public static boolean useItemOnNpc(int item, Rs2NpcModel npc) {
+        if (Rs2Bank.isOpen()) return false;
+        use(item);
+        sleepUntil(Rs2Inventory::isItemSelected, 1000);
+        if (!isItemSelected()) return false;
+        Rs2Npc.interact(npc);
         return true;
     }
 
@@ -2112,12 +2141,14 @@ public class Rs2Inventory {
     }
 
     /**
-     * Method executes menu actions
+     * Executes menu actions with a provided identifier.
+     * If the provided identifier is -1, the old logic is used to determine the identifier.
      *
-     * @param rs2Item Current item to interact with
-     * @param action  Action used on the item
+     * @param rs2Item            The current item to interact with.
+     * @param action             The action to be used on the item.
+     * @param providedIdentifier The identifier to use; if -1, compute using the old logic.
      */
-    private static void invokeMenu(Rs2ItemModel rs2Item, String action) {
+    private static void invokeMenu(Rs2ItemModel rs2Item, String action, int providedIdentifier) {
         if (rs2Item == null) return;
 
         Rs2Tab.switchToInventoryTab();
@@ -2129,34 +2160,44 @@ public class Rs2Inventory {
         MenuAction menuAction = MenuAction.CC_OP;
         Widget[] inventoryWidgets;
         param0 = rs2Item.slot;
-        boolean isDepositBoxOpen = !Microbot.getClientThread().runOnClientThread(() -> Rs2Widget.getWidget(ComponentID.DEPOSIT_BOX_INVENTORY_ITEM_CONTAINER) == null
-                || Rs2Widget.getWidget(ComponentID.DEPOSIT_BOX_INVENTORY_ITEM_CONTAINER).isHidden());
+        boolean isDepositBoxOpen = !Microbot.getClientThread().runOnClientThreadOptional(() -> Rs2Widget.getWidget(ComponentID.DEPOSIT_BOX_INVENTORY_ITEM_CONTAINER) == null
+                || Rs2Widget.getWidget(ComponentID.DEPOSIT_BOX_INVENTORY_ITEM_CONTAINER).isHidden()).orElse(false);
+
+        Widget widget;
+
         if (Rs2Bank.isOpen()) {
             param1 = ComponentID.BANK_INVENTORY_ITEM_CONTAINER;
-            inventoryWidgets = Rs2Widget.getWidget(ComponentID.BANK_INVENTORY_ITEM_CONTAINER).getChildren();
+            widget = Rs2Widget.getWidget(param1);
         } else if (isDepositBoxOpen) {
             param1 = ComponentID.DEPOSIT_BOX_INVENTORY_ITEM_CONTAINER;
-            inventoryWidgets = Rs2Widget.getWidget(ComponentID.DEPOSIT_BOX_INVENTORY_ITEM_CONTAINER).getChildren();
+            widget = Rs2Widget.getWidget(param1);
         } else if (Rs2GrandExchange.isOpen()) {
             param1 = ComponentID.GRAND_EXCHANGE_INVENTORY_INVENTORY_ITEM_CONTAINER;
-            inventoryWidgets = Rs2Widget.getWidget(ComponentID.GRAND_EXCHANGE_INVENTORY_INVENTORY_ITEM_CONTAINER).getChildren();
+            widget = Rs2Widget.getWidget(param1);
         } else if (Rs2Shop.isOpen()) {
             param1 = 19726336;
-            inventoryWidgets = Rs2Widget.getWidget(19726336).getChildren();
+            widget = Rs2Widget.getWidget(param1);
         } else {
             param1 = ComponentID.INVENTORY_CONTAINER;
-            inventoryWidgets = Rs2Widget.getWidget(ComponentID.INVENTORY_CONTAINER).getChildren();
+            widget = Rs2Widget.getWidget(param1);
         }
 
+        if (widget != null && widget.getChildren() != null) {
+            inventoryWidgets = widget.getChildren();
+        } else {
+            inventoryWidgets = null;
+        }
+
+        if (inventoryWidgets == null) return;
+
         if (!action.isEmpty()) {
-            assert inventoryWidgets != null;
             var itemWidget = Arrays.stream(inventoryWidgets).filter(x -> x != null && x.getIndex() == rs2Item.slot).findFirst().orElseGet(null);
 
             String[] actions = itemWidget != null && itemWidget.getActions() != null ?
                     itemWidget.getActions() :
                     rs2Item.getInventoryActions();
 
-            identifier = indexOfIgnoreCase(stripColTags(actions), action) + 1;
+            identifier = providedIdentifier == -1 ? indexOfIgnoreCase(stripColTags(actions), action) + 1 : providedIdentifier;
         }
 
 
@@ -2176,10 +2217,21 @@ public class Rs2Inventory {
         }
     }
 
+
+    /**
+     * Method executes menu actions
+     *
+     * @param rs2Item Current item to interact with
+     * @param action  Action used on the item
+     */
+    private static void invokeMenu(Rs2ItemModel rs2Item, String action) {
+        invokeMenu(rs2Item, action, -1);
+    }
+
     private static Widget getInventory() {
         final int BANK_PIN_INVENTORY_ITEM_CONTAINER = 17563648;
         final int SHOP_INVENTORY_ITEM_CONTAINER = 19726336;
-        return Microbot.getClientThread().runOnClientThread(() -> {
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             Widget inventoryWidget = Microbot.getClient().getWidget(ComponentID.INVENTORY_CONTAINER);
             Widget bankInventoryWidget = Microbot.getClient().getWidget(ComponentID.BANK_INVENTORY_ITEM_CONTAINER);
             Widget bankPinInventoryWidget = Microbot.getClient().getWidget(BANK_PIN_INVENTORY_ITEM_CONTAINER);
@@ -2205,7 +2257,7 @@ public class Rs2Inventory {
                 return depositBoxWidget;
             }
             return null;
-        });
+        }).orElse(null);
     }
 
     /**
@@ -2233,7 +2285,7 @@ public class Rs2Inventory {
             invokeMenu(rs2Item, actionAndQuantity);
             return true;
         } catch (Exception ex) {
-            System.out.println(ex.getMessage());
+            Microbot.logStackTrace("Rs2Inventory", ex);
             return false;
         }
     }

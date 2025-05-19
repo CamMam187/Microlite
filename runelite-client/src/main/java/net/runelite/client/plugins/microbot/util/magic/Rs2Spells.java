@@ -210,6 +210,11 @@ public enum Rs2Spells {
             Runes.COSMIC, 1,
             Runes.FIRE, 20
     ), Rs2Spellbook.MODERN),
+    ENCHANT_ZENYTE_JEWELLERY(MagicAction.ENCHANT_ZENYTE_JEWELLERY, Map.of(
+            Runes.COSMIC, 1,
+            Runes.SOUL, 20,
+            Runes.BLOOD, 20
+    ), Rs2Spellbook.MODERN),
     CHARGE_WATER_ORB(MagicAction.CHARGE_WATER_ORB, Map.of(
             Runes.WATER, 30,
             Runes.COSMIC, 3
@@ -589,6 +594,21 @@ public enum Rs2Spells {
             Runes.EARTH, 10,
             Runes.COSMIC, 1,
             Runes.DEATH, 5
+    ), Rs2Spellbook.ARCEUUS),
+    RESURRECT_GREATER_GHOST(MagicAction.RESURRECT_GREATER_GHOST, Map.of(
+            Runes.FIRE, 10,
+            Runes.COSMIC, 1,
+            Runes.BLOOD, 5
+    ), Rs2Spellbook.ARCEUUS),
+    RESURRECT_GREATER_SKELETON(MagicAction.RESURRECT_GREATER_SKELETON, Map.of(
+            Runes.FIRE, 10,
+            Runes.COSMIC, 1,
+            Runes.BLOOD, 5
+    ), Rs2Spellbook.ARCEUUS),
+    RESURRECT_GREATER_ZOMBIE(MagicAction.RESURRECT_GREATER_ZOMBIE, Map.of(
+            Runes.FIRE, 10,
+            Runes.COSMIC, 1,
+            Runes.BLOOD, 5
     ), Rs2Spellbook.ARCEUUS),
     DARK_LURE(MagicAction.DARK_LURE, Map.of(
             Runes.DEATH, 1,

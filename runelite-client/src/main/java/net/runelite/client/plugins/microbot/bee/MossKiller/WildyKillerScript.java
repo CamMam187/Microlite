@@ -24,7 +24,6 @@ import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItem;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
@@ -43,6 +42,7 @@ import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
 
 import javax.inject.Inject;
 import javax.swing.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
@@ -58,6 +58,7 @@ import static net.runelite.client.plugins.microbot.bee.MossKiller.Enums.CombatMo
 import static net.runelite.client.plugins.microbot.util.antiban.enums.ActivityIntensity.LOW;
 import static net.runelite.client.plugins.microbot.util.player.Rs2Player.*;
 import static net.runelite.client.plugins.microbot.util.player.Rs2Pvp.getWildernessLevelFrom;
+import static net.runelite.client.plugins.microbot.util.prayer.Rs2Prayer.isPrayerActive;
 import static net.runelite.client.plugins.microbot.util.prayer.Rs2Prayer.toggle;
 import static net.runelite.client.plugins.microbot.util.prayer.Rs2PrayerEnum.*;
 import static net.runelite.client.plugins.skillcalculator.skills.MagicAction.HIGH_LEVEL_ALCHEMY;
@@ -74,6 +75,9 @@ public class WildyKillerScript extends Script {
 
     @Inject
     private MossKillerPlugin mossKillerPlugin;
+
+    @Inject
+    private MossKillerScript mossKillerScript;
 
     @Inject
     private MossKillerConfig mossKillerConfig;
@@ -103,9 +107,9 @@ public class WildyKillerScript extends Script {
     public static final WorldArea LUMBRIDGE_AREA = new WorldArea(3189, 3183, 63, 62, 0);
     public static final WorldArea CASTLE_WARS_AREA = new WorldArea(2433, 3076, 15, 25, 0);
     private static final WorldArea WILDERNESS_AREA = new WorldArea(2944, 3520, 448, 384, 0);
-    private static final int COMBAT_TAB_WIDGET_ID = 35913791;  // Combat tab
-    private static final int CHOOSE_SPELL_WIDGET_ID = 38862875; // Choose spell
-    private static final int CHOOSE_SPELL_DEFENSIVE_WIDGET_ID = 38862870; // Choose spell
+    public static final int COMBAT_TAB_WIDGET_ID = 35913791;  // Combat tab
+    public static final int CHOOSE_SPELL_WIDGET_ID = 38862875; // Choose spell
+    public static final int CHOOSE_SPELL_DEFENSIVE_WIDGET_ID = 38862870; // Choose spell
     public boolean hitsplatApplied = false;
     public boolean isTargetOutOfReach = false;
 
@@ -138,6 +142,7 @@ public class WildyKillerScript extends Script {
         System.out.println("getting to run");
         WildyKillerScript.config = config;
         Microbot.enableAutoRunOn = false;
+        Rs2Walker.disableTeleports = false;
         Rs2Antiban.resetAntibanSettings();
         Rs2AntibanSettings.usePlayStyle = true;
         Rs2AntibanSettings.simulateFatigue = true;
@@ -153,6 +158,7 @@ public class WildyKillerScript extends Script {
         Rs2AntibanSettings.moveMouseRandomlyChance = 0.04;
         Rs2AntibanSettings.actionCooldownChance = 0.06;
         Rs2Antiban.setActivityIntensity(LOW);
+        Rs2AntibanSettings.dynamicActivity = true;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
@@ -161,8 +167,12 @@ public class WildyKillerScript extends Script {
                 long startTime = System.currentTimeMillis();
 
                 Microbot.log("SoL " + state);
+                if (mossKillerPlugin.startedFromScheduler) {prepareSchedulerStart();
+                    mossKillerPlugin.startedFromScheduler = false;}
+                if (mossKillerPlugin.preparingForShutdown) {
+                    MossKillerScript.prepareSoftStop();}
                 Rs2AntibanSettings.antibanEnabled = mossKillerPlugin.currentTarget == null; // Enable Anti-Ban when no target is found
-
+                Rs2AntibanSettings.naturalMouse = mossKillerPlugin.currentTarget == null;
                 if (isRunning() && BreakHandlerScript.breakIn <= 120 && Rs2Player.getWorldLocation().getY() < 3520) {
                     Microbot.log("On a break and not in wilderness");
                     if (isRunning()) {
@@ -267,7 +277,7 @@ public class WildyKillerScript extends Script {
         scheduledFuture = scheduledExecutorService.schedule(() -> {
             try {
                 Microbot.log("Entered Asynch Walking Thread");
-                WorldPoint playerLocation = client.getLocalPlayer().getWorldLocation();
+                WorldPoint playerLocation = Rs2Player.getLocalPlayer().getWorldLocation();
 
                 if (playerLocation.getY() > 3520) {
                     // Check and reset the appropriate flag
@@ -280,7 +290,8 @@ public class WildyKillerScript extends Script {
                                 Rs2Walker.walkTo(TWENTY_WILD);
                             }
                             // If the player has reached the target location (TWENTY_WILD)
-                            if (Rs2Walker.getDistanceBetween(Rs2Player.getWorldLocation(), TWENTY_WILD) <= 5) {
+                            if (Rs2Walker.getDistanceBetween(Rs2Player.getWorldLocation(), TWENTY_WILD) <= 10
+                                    && Rs2Player.getWorldLocation().getY() <= 3679) {
                                 Microbot.log("Reached TWENTY_WILD.");
                                 sleep(1000);
                                 if (isTeleBlocked()) {
@@ -288,7 +299,7 @@ public class WildyKillerScript extends Script {
                                     handleAsynchWalk("Zero Wild");
                                 }
                                 teleportAndStopWalking();
-                            }
+                            } else {Rs2Walker.walkFastCanvas(TWENTY_WILD);}
                             break;
                         case "Zero Wild":
                             if (isTeleBlocked()) {
@@ -451,19 +462,54 @@ public class WildyKillerScript extends Script {
 
         }
 
+        if (!scheduledFuture.isDone()) {
+            if (!Rs2Equipment.hasEquipped(STAFF_OF_FIRE)) {
+                Rs2Inventory.equip(STAFF_OF_FIRE);
+            }
+        }
+
         if (mossKillerPlugin.currentTarget != null
                 && mossKillerPlugin.currentTarget.getCombatLevel() > 87
                 && getWildernessLevelFrom(Rs2Player.getWorldLocation()) > 20) {
             toggle(STEEL_SKIN, true);
             toggle(MYSTIC_LORE, true);
+            if (hasPlayerEquippedItem(mossKillerPlugin.currentTarget, RUNE_SCIMITAR)
+                    && Microbot.getClient().getRealSkillLevel(PRAYER) > 42
+                    && Microbot.getClient().getBoostedSkillLevel(PRAYER) > 0
+                    && !Rs2Prayer.isPrayerActive(PROTECT_MELEE)){
+                toggle(PROTECT_MELEE);
+            }
+            if (hasPlayerEquippedItem(mossKillerPlugin.currentTarget, MAPLE_SHORTBOW)
+                    && Microbot.getClient().getRealSkillLevel(PRAYER) > 39
+                    && Microbot.getClient().getBoostedSkillLevel(PRAYER) > 0
+                    && !Rs2Prayer.isPrayerActive(PROTECT_RANGE)){
+                toggle(PROTECT_RANGE);
+            }
+            if (Microbot.getClient().getBoostedSkillLevel(PRAYER) > 0
+                    && !Rs2Prayer.isPrayerActive(PROTECT_MAGIC)){
+                if (Rs2Player.getRealSkillLevel(PRAYER) > 36) {
+                    Rs2Prayer.toggle(PROTECT_MAGIC, hasPlayerEquippedItem(mossKillerPlugin.currentTarget, STAFF_OF_FIRE)
+                            || hasPlayerEquippedItem(mossKillerPlugin.currentTarget, STAFF_OF_AIR)
+                            || hasPlayerEquippedItem(mossKillerPlugin.currentTarget, STAFF_OF_WATER)
+                            || hasPlayerEquippedItem(mossKillerPlugin.currentTarget, STAFF_OF_EARTH)
+                            || hasPlayerEquippedItem(mossKillerPlugin.currentTarget, BRYOPHYTAS_STAFF)
+                            || hasPlayerEquippedItem(mossKillerPlugin.currentTarget, BRYOPHYTAS_STAFF_UNCHARGED));
+                }
+            }
             if (ShortestPathPlugin.getPathfinder() == null && !MossKillerPlugin.isPlayerSnared()) {
                 handleAsynchWalk("Twenty Wild");
             }
         }
 
         if (mossKillerConfig.combatMode() != LURE) {
-            if (Rs2Player.isInMulti()
-                    && scheduledFuture.isDone()
+            if (Rs2Player.isInMulti()) {
+                Microbot.log("In multi");
+                Microbot.log("scheduledFuture" + scheduledFuture.isDone());
+                if(ShortestPathPlugin.getPathfinder() == null) {Microbot.log("shortestpath is null");}
+                if(ShortestPathPlugin.getPathfinder() != null) {
+                        Microbot.log("shortest path is not null");}
+            }
+                    if (scheduledFuture.isDone()
                     && ShortestPathPlugin.getPathfinder() == null) {
 
                 handleAsynchWalk("Moss Giants");
@@ -527,12 +573,6 @@ public class WildyKillerScript extends Script {
     }
 
     private void fight() {
-
-        if(Rs2Player.getBoostedSkillLevel(HITPOINTS) == 0) {
-            Rs2Keyboard.typeString("gg");
-            Rs2Keyboard.enter();
-            sleep(1200,1800);
-        }
 
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
 
@@ -679,7 +719,7 @@ public class WildyKillerScript extends Script {
 
         if (target != null && target.getCombatLevel() > 87
                 && getWildernessLevelFrom(Rs2Player.getWorldLocation()) > 20) {
-            Microbot.log("Target is over level 90");
+            Microbot.log("Target is over level 87");
             eatingMethod(target);
             if (ShortestPathPlugin.getPathfinder() == null && !MossKillerPlugin.isPlayerSnared()) {
                 handleAsynchWalk("Twenty Wild");
@@ -723,23 +763,45 @@ public class WildyKillerScript extends Script {
         boolean useMelee = mossKillerPlugin.useMelee();
         boolean useRange = mossKillerPlugin.useRange();
 
+        if (!isInMulti()) {
+            if (Rs2Player.getRealSkillLevel(PRAYER) > 39) {
+                Rs2Prayer.toggle(PROTECT_RANGE, hasPlayerEquippedItem(target, MAPLE_SHORTBOW)
+                        || hasPlayerEquippedItem(target, WILLOW_SHORTBOW)
+                        || hasPlayerEquippedItem(target, OAK_SHORTBOW)
+                        || hasPlayerEquippedItem(target, MAPLE_LONGBOW)
+                        || hasPlayerEquippedItem(target, WILLOW_LONGBOW)
+                        || hasPlayerEquippedItem(target, LONGBOW)
+                        || hasPlayerEquippedItem(target, SHORTBOW)
+                        || hasPlayerEquippedItem(target, OAK_LONGBOW));
+            }
+
+            if (Rs2Player.getRealSkillLevel(PRAYER) > 36) {
+                Rs2Prayer.toggle(PROTECT_MAGIC, hasPlayerEquippedItem(target, STAFF_OF_FIRE)
+                        || hasPlayerEquippedItem(target, STAFF_OF_AIR)
+                        || hasPlayerEquippedItem(target, STAFF_OF_WATER)
+                        || hasPlayerEquippedItem(target, STAFF_OF_EARTH)
+                        || hasPlayerEquippedItem(target, BRYOPHYTAS_STAFF)
+                        || hasPlayerEquippedItem(target, BRYOPHYTAS_STAFF_UNCHARGED));
+            }
+
+            if (Rs2Player.getRealSkillLevel(PRAYER) > 42) {
+                Rs2Prayer.toggle(PROTECT_MELEE, hasPlayerEquippedItem(target, RUNE_SCIMITAR)
+                        || hasPlayerEquippedItem(target, RUNE_WARHAMMER)
+                        || hasPlayerEquippedItem(target, RUNE_2H_SWORD)
+                        || hasPlayerEquippedItem(target, RUNE_BATTLEAXE)
+                        || hasPlayerEquippedItem(target, RUNE_SWORD)
+                        || hasPlayerEquippedItem(target, BARRONITE_MACE)
+                        || hasPlayerEquippedItem(target, RUNE_MACE));
+            }
+        } else if (isInMulti()) {
+            monitorAttacks();
+        }
+
+
         if (target != null
                 && target.getCombatLevel() < 88
                 && target.getOverheadIcon() == null
                 && !MossKillerPlugin.isPlayerSnared()) {
-
-            if (Rs2Prayer.isPrayerActive(PROTECT_MAGIC) || Rs2Prayer.isPrayerActive(PROTECT_MELEE)) {
-                Rs2Prayer.toggle(PROTECT_MAGIC, false);
-                Rs2Prayer.toggle(PROTECT_RANGE, false);
-            }
-
-            if (hasPlayerEquippedItem(target, MAPLE_SHORTBOW)) {
-                if (Rs2Player.getRealSkillLevel(PRAYER) > 39 && Rs2Player.getBoostedSkillLevel(PRAYER) > 0) {
-                    toggle(PROTECT_RANGE, true);
-                }
-            } else if (Rs2Prayer.isPrayerActive(PROTECT_RANGE)) {
-                toggle(PROTECT_RANGE, false);
-            }
 
             if (hasPlayerEquippedItem(target, RUNE_PLATEBODY) && Rs2Inventory.contains(DEATH_RUNE)) {
                 castWindBlast(target);
@@ -773,12 +835,6 @@ public class WildyKillerScript extends Script {
                 && target.getOverheadIcon() == null
                 && MossKillerPlugin.isPlayerSnared()) {
 
-            if (Rs2Prayer.isPrayerActive(PROTECT_RANGE) || Rs2Prayer.isPrayerActive(PROTECT_MAGIC) || Rs2Prayer.isPrayerActive(PROTECT_MELEE)) {
-                Rs2Prayer.toggle(PROTECT_RANGE, false);
-                Rs2Prayer.toggle(PROTECT_MAGIC, false);
-                Rs2Prayer.toggle(PROTECT_RANGE, false);
-            }
-
             if (!isTargetPlayerFar(target)) {
                 if (Rs2Inventory.contains(RUNE_SCIMITAR)) {
                     Rs2Inventory.interact(RUNE_SCIMITAR, "Wield");
@@ -802,20 +858,6 @@ public class WildyKillerScript extends Script {
 
         if (target != null && target.getOverheadIcon() != null && target.getCombatLevel() < 88) {
 
-            if (Rs2Player.getRealSkillLevel(PRAYER) > 36) {
-                Rs2Prayer.toggle(PROTECT_MAGIC, hasPlayerEquippedItem(target, STAFF_OF_FIRE)
-                        || hasPlayerEquippedItem(target, STAFF_OF_AIR)
-                        || hasPlayerEquippedItem(target, STAFF_OF_WATER)
-                        || hasPlayerEquippedItem(target, STAFF_OF_EARTH)
-                        || hasPlayerEquippedItem(target, BRYOPHYTAS_STAFF)
-                        || hasPlayerEquippedItem(target, BRYOPHYTAS_STAFF_UNCHARGED));
-            }
-
-            if (Rs2Player.getRealSkillLevel(PRAYER) > 39) {
-                Rs2Prayer.toggle(PROTECT_RANGE, hasPlayerEquippedItem(target, MAPLE_SHORTBOW));
-            }
-
-            // Target has an overhead prayer icon
             if (useMelee && weHaveEnoughEnergyToPersue()) {
                 if (!Rs2Equipment.hasEquipped(RUNE_SCIMITAR)) {
                     Rs2Inventory.interact(RUNE_SCIMITAR, "Wield");
@@ -866,7 +908,7 @@ public class WildyKillerScript extends Script {
                 }
             }
 
-            if (!castWindBlastOverhead(target) && useRange && Rs2Equipment.hasEquipped(ADAMANT_ARROW)) {
+            if (useRange && Rs2Equipment.hasEquipped(ADAMANT_ARROW)) {
                 if (!Rs2Equipment.hasEquipped(MAPLE_SHORTBOW) && Rs2Equipment.hasEquipped(ADAMANT_ARROW)) {
                     Rs2Inventory.interact(MAPLE_SHORTBOW, "Wield");
                     eatingMethod(target);
@@ -887,7 +929,7 @@ public class WildyKillerScript extends Script {
                     sleepUntil(() -> hitsplatApplied || MossKillerPlugin.isPlayerSnared() || healthIsLow());
                     eatingMethod(target);
                 }
-            }
+            } else if (useRange && !Rs2Equipment.hasEquipped(ADAMANT_ARROW)) {castWindBlast(target);}
 
             if (useMage && MossKillerPlugin.isPlayerSnared()) {
                 if (doWeFocusCamera(target)) {
@@ -996,6 +1038,184 @@ public class WildyKillerScript extends Script {
             return false;
         }
         return false;
+    }
+
+    public List<Rs2PlayerModel> getAttackers(List<Rs2PlayerModel> potentialTargets) {
+        List<Rs2PlayerModel> attackers = new ArrayList<>();
+        Rs2PlayerModel localPlayer = (Rs2PlayerModel) Microbot.getClient().getLocalPlayer();
+
+        if (localPlayer != null) {
+            for (Rs2PlayerModel player : potentialTargets) {
+                if (player != null && player.getInteracting() == localPlayer) {
+                    attackers.add(player);
+                }
+            }
+        }
+
+        return attackers;
+    }
+
+
+    public void monitorAttacks() {
+        List<Rs2PlayerModel> potentialTargets = getPotentialTargets();  // Existing method to get potential targets
+        List<Rs2PlayerModel> attackers = getAttackers(potentialTargets);  // Determine which targets are attacking the bot
+        int attackingPlayers = attackers.size();
+
+        System.out.println("Number of players attacking: " + attackingPlayers);
+
+        if (attackingPlayers >= 3) {
+            System.out.println("Under attack by multiple players, checking and eating.");
+            if (Microbot.getClient().getRealSkillLevel(Skill.PRAYER) >= 43) {
+                handleProtectionPrayers(attackers);}} // introduce spam eating here
+           if (attackingPlayers == 2) {
+            System.out.println("Under attack by exactly 2 players, eating at 90 HP.");
+            handleProtectionPrayers(attackers);
+            Rs2Player.eatAt(90);
+        }
+    }
+
+
+    public String getCombatStyle(Rs2PlayerModel player) {
+        int[] equipmentIds = player.getPlayerComposition().getEquipmentIds();
+
+        if (equipmentIds == null) {
+            return "UNKNOWN";
+        }
+
+        int MAPLE_SHORTBOW_ID = 2901;
+        int MAPLE_LONGBOW_ID = 2899;
+        int RUNE_SCIMITAR_ID = 3381;
+        int GILDED_SCIMITAR_ID = 14437;
+        int STAFF_OF_FIRE_ID = 3435;
+        int STAFF_OF_WATER_ID = 3431;
+        int STAFF_OF_EARTH_ID = 3433;
+        int STAFF_OF_AIR_ID = 3429;
+
+        // Check the weapon slot (usually index 3 in equipment array)
+        int weaponId = equipmentIds[3];
+
+        // Check for Ranged weapon (Maple Shortbow)
+        if (weaponId == MAPLE_SHORTBOW_ID || weaponId == MAPLE_LONGBOW_ID ) {
+            return "RANGE";
+        }
+
+        // Check for Melee weapons (Rune Scimitar, etc.)
+        if (weaponId == RUNE_SCIMITAR_ID || weaponId == GILDED_SCIMITAR_ID) {
+            return "MELEE";
+        }
+
+        // Check for Magic weapons (Staff of Fire, etc.)
+        if (weaponId == STAFF_OF_FIRE_ID || weaponId == STAFF_OF_WATER_ID || weaponId == STAFF_OF_EARTH_ID || weaponId == STAFF_OF_AIR_ID) {
+            return "MAGIC";
+        }
+
+        return "UNKNOWN";
+    }
+
+    private void handleProtectionPrayers(List<Rs2PlayerModel> attackers) {
+        int meleeAttackers = 0;
+        int rangedAttackers = 0;
+        int magicAttackers = 0;
+
+        int meleeCombatLevelSum = 0;
+        int rangedCombatLevelSum = 0;
+        int magicCombatLevelSum = 0;
+
+        for (Rs2PlayerModel attacker : attackers) {
+            String style = getCombatStyle(attacker);  // Now returns a String ("MELEE", "RANGE", "MAGIC")
+            int combatLevel = attacker.getCombatLevel();
+
+            switch (style) {
+                case "MELEE":
+                    meleeAttackers++;
+                    meleeCombatLevelSum += combatLevel;
+                    break;
+
+                case "RANGE":
+                    rangedAttackers++;
+                    rangedCombatLevelSum += combatLevel;
+                    break;
+
+                case "MAGIC":
+                    magicAttackers++;
+                    magicCombatLevelSum += combatLevel;
+                    break;
+
+                default:
+                    // Handle unknown combat style if necessary
+                    break;
+            }
+        }
+
+        // Determine the bot's own combat style and choose the correct prayer based on its weaknesses
+        Rs2PrayerEnum optimalPrayer = null;
+        switch (config.combatMode()) {
+            case MAIN_MELEE:
+                optimalPrayer = determineOptimalPrayerForMelee(meleeAttackers, rangedAttackers, magicAttackers,
+                        meleeCombatLevelSum, rangedCombatLevelSum, magicCombatLevelSum);
+                break;
+
+            case MAIN_RANGE:
+                optimalPrayer = determineOptimalPrayerForRange(meleeAttackers, rangedAttackers, magicAttackers,
+                        meleeCombatLevelSum, rangedCombatLevelSum, magicCombatLevelSum);
+                break;
+
+            case MAIN_MAGE:
+                optimalPrayer = determineOptimalPrayerForMage(meleeAttackers, rangedAttackers, magicAttackers,
+                        meleeCombatLevelSum, rangedCombatLevelSum, magicCombatLevelSum);
+                break;
+
+            default:
+                break;
+        }
+
+        // Only toggle prayer if the optimal prayer is different from the currently active one
+        if (optimalPrayer != null && !isPrayerActive(optimalPrayer)) {
+            toggle(optimalPrayer, true);  // Activate the optimal prayer
+            System.out.println("Activated " + optimalPrayer.name());
+        }
+    }
+
+    // Determine the optimal prayer for a Melee-based bot
+    private Rs2PrayerEnum determineOptimalPrayerForMelee(int meleeAttackers, int rangedAttackers, int magicAttackers,
+                                                         int meleeCombatLevelSum, int rangedCombatLevelSum, int magicCombatLevelSum) {
+        // Melee is weak to Magic, so prioritize Protect from Magic
+        if (magicAttackers >= 3 || (magicCombatLevelSum >= meleeCombatLevelSum && magicCombatLevelSum >= rangedCombatLevelSum)) {
+            return Rs2PrayerEnum.PROTECT_MAGIC;
+        }
+        // If Magic is not a significant threat, fallback to Protect from Melee or Ranged based on their presence
+        if (rangedAttackers >= 3 || rangedCombatLevelSum >= meleeCombatLevelSum) {
+            return Rs2PrayerEnum.PROTECT_RANGE;
+        }
+        return Rs2PrayerEnum.PROTECT_MELEE;
+    }
+
+    // Determine the optimal prayer for a Ranged-based bot
+    private Rs2PrayerEnum determineOptimalPrayerForRange(int meleeAttackers, int rangedAttackers, int magicAttackers,
+                                                         int meleeCombatLevelSum, int rangedCombatLevelSum, int magicCombatLevelSum) {
+        // Ranged is weak to Melee, so prioritize Protect from Melee
+        if (meleeAttackers >= 3 || (meleeCombatLevelSum >= rangedCombatLevelSum && meleeCombatLevelSum >= magicCombatLevelSum)) {
+            return Rs2PrayerEnum.PROTECT_MELEE;
+        }
+        // If Melee is not a significant threat, fallback to Protect from Magic or Ranged based on their presence
+        if (magicAttackers >= 3 || magicCombatLevelSum >= rangedCombatLevelSum) {
+            return Rs2PrayerEnum.PROTECT_MAGIC;
+        }
+        return Rs2PrayerEnum.PROTECT_RANGE;
+    }
+
+    // Determine the optimal prayer for a Mage-based bot
+    private Rs2PrayerEnum determineOptimalPrayerForMage(int meleeAttackers, int rangedAttackers, int magicAttackers,
+                                                        int meleeCombatLevelSum, int rangedCombatLevelSum, int magicCombatLevelSum) {
+        // Magic is weak to Ranged, so prioritize Protect from Missiles
+        if (rangedAttackers >= 3 || (rangedCombatLevelSum >= meleeCombatLevelSum && rangedCombatLevelSum >= magicCombatLevelSum)) {
+            return Rs2PrayerEnum.PROTECT_RANGE;
+        }
+        // If Ranged is not a significant threat, fallback to Protect from Melee or Magic based on their presence
+        if (meleeAttackers >= 3 || meleeCombatLevelSum >= magicCombatLevelSum) {
+            return Rs2PrayerEnum.PROTECT_MELEE;
+        }
+        return Rs2PrayerEnum.PROTECT_MAGIC;
     }
 
     public boolean weHaveEnoughEnergyToPersue() {
@@ -1480,7 +1700,7 @@ public class WildyKillerScript extends Script {
                 Rs2Inventory.interact(BIG_BONES, "Bury");
                 Rs2Player.waitForAnimation();
             }
-            if (!Rs2Inventory.isFull() && Rs2GroundItem.interact(BIG_BONES, "Take", 2)) {
+            if (!Rs2Inventory.isFull() && mossKillerPlugin.currentTarget == null && Rs2GroundItem.interact(BIG_BONES, "Take", 2)) {
                 toggleRunEnergyOn();
                 sleepUntil(() -> Rs2Inventory.contains(BIG_BONES));
                 if (Rs2Inventory.contains(BIG_BONES)) {
@@ -1549,6 +1769,10 @@ public class WildyKillerScript extends Script {
         if (Rs2Inventory.contains(MOSSY_KEY)) {
             state = MossKillerState.PKER;
         }
+    }
+
+    private List<Rs2PlayerModel> getPotentialTargets() {
+        return getNearbyPlayers(12);
     }
 
     public List<Rs2PlayerModel> getNearbyPlayers(int distance) {
@@ -1810,7 +2034,7 @@ public class WildyKillerScript extends Script {
 
 
                 if (!Rs2Equipment.hasEquipped(RUNE_CHAINBODY)) {
-                    OutfitHelper.equipOutfit(OutfitHelper.OutfitType.MAGE);
+                    OutfitHelper.equipOutfit(OutfitHelper.OutfitType.MOSS_MAGE);
                     //equipItems();
 
                     CombatMode mode = mossKillerConfig.combatMode();
@@ -1862,6 +2086,7 @@ public class WildyKillerScript extends Script {
             sleep(500, 1000);
         }
 
+        mossKillerPlugin.dead = false;
     }
 
     public void setAutocastFireStrike() {
@@ -1900,7 +2125,7 @@ public class WildyKillerScript extends Script {
         }
         sleep(1500);
 
-        Rs2Widget.clickWidget("Fire Strike");
+        Rs2Widget.clickWidget("Fire Strike", true);
 
         sleep(1500);
 
@@ -2201,13 +2426,14 @@ public class WildyKillerScript extends Script {
             if (scheduledFuture.isDone() && !Rs2Inventory.hasItemAmount(FOOD, 17)) { // Only initiate if not already walking to Twenty Wild
                 handleAsynchWalk("Twenty Wild");
             }
+            if (Rs2Walker.getDistanceBetween(playerLocation, TWENTY_WILD) < 5) {
+                teleportAndStopWalking();
             if (Rs2Inventory.hasItemAmount(FOOD, 17)) {
                 state = MossKillerState.WALK_TO_MOSS_GIANTS;
             }
             Microbot.log("Hitting Return");
             return;
-        } else if (Rs2Walker.getDistanceBetween(playerLocation, TWENTY_WILD) < 5) {
-            teleportAndStopWalking();
+        }
         }
 
         // Check if the player has teleported (Y-coordinate condition)
@@ -2256,6 +2482,30 @@ public class WildyKillerScript extends Script {
         if (!Rs2Player.isRunEnabled() && Rs2Player.getRunEnergy() > 0) {
             Rs2Player.toggleRunEnergy(true);
         }
+    }
+
+    private void prepareSchedulerStart() {
+        if (isWearingOutfit(OutfitHelper.OutfitType.MOSS_MAGE)) {
+            Microbot.log("Already wearing MOSS_MAGE outfit. Skipping outfit pre-prep.");
+            return;
+        }
+        Rs2Bank.walkToBank();
+        Rs2Bank.openBank();
+        sleepUntil(Rs2Bank::isOpen);
+        Rs2Bank.depositAll();
+        Rs2Bank.depositEquipment();
+        Rs2Bank.closeBank();
+        Rs2Bank.walkToBank(BankLocation.FEROX_ENCLAVE);
+    }
+
+    public static boolean isWearingOutfit(OutfitHelper.OutfitType outfitType) {
+        String[] items = outfitType.getOutfitItems();
+        for (String item : items) {
+            if (!Rs2Equipment.isWearing(item)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public void toggleRunEnergyOff() {

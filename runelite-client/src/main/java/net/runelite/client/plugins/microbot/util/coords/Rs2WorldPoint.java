@@ -47,6 +47,11 @@ public class Rs2WorldPoint {
 
     public List<WorldPoint> pathTo(WorldPoint other)
     {
+        return pathTo(other, false);
+    }
+
+    public List<WorldPoint> pathTo(WorldPoint other, boolean fullPath)
+    {
         Client client = Microbot.getClient();
         if (getPlane() != other.getPlane())
         {
@@ -69,7 +74,7 @@ public class Rs2WorldPoint {
         Tile sourceTile = tiles[getPlane()][thisX][thisY];
 
         Tile targetTile = tiles[getPlane()][otherX][otherY];
-        List<Tile> checkpointTiles = Rs2Tile.pathTo(sourceTile,targetTile);
+        List<Tile> checkpointTiles = fullPath ? Rs2Tile.fullPathTo(sourceTile,targetTile) : Rs2Tile.pathTo(sourceTile, targetTile);
         if (checkpointTiles == null)
         {
             return null;
@@ -136,6 +141,34 @@ public class Rs2WorldPoint {
 
 
         return WorldPoint.toLocalInstance(Microbot.getClient().getTopLevelWorldView(),worldPoint).stream().findFirst().orElse(null);
+    }
+
+    /**
+     * Calculate the distance quikcly with Chebyshev distance
+     * https://iq.opengenus.org/euclidean-vs-manhattan-vs-chebyshev-distance/
+     * @param a
+     * @param b
+     * @return
+     */
+    public static int quickDistance(WorldPoint a, WorldPoint b) {
+        int dx = Math.abs(a.getX() - b.getX());
+        int dy = Math.abs(normalizeY(a) - normalizeY(b));
+        return Math.max(dx, dy);
+    }
+
+    /**
+     * Normalize a point to use for comparison
+     * This is used for caves
+     * @param point
+     * @return
+     */
+    public static int normalizeY(WorldPoint point) {
+        int y = point.getY();
+
+        if (y > 6400) {
+            return y - 6400;
+        }
+        return y;
     }
 
     // Override equals, hashCode, and toString if necessary

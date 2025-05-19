@@ -9,12 +9,14 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.config.ProfileManager;
+import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.NPCManager;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.game.WorldService;
+import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.PluginInstantiationException;
@@ -25,6 +27,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Gembag;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.item.Rs2ItemManager;
 import net.runelite.client.plugins.microbot.util.mouse.VirtualMouse;
 import net.runelite.client.plugins.microbot.util.mouse.naturalmouse.NaturalMouse;
 import net.runelite.client.plugins.microbot.util.overlay.GembagOverlay;
@@ -43,13 +46,15 @@ import javax.inject.Inject;
 import javax.swing.*;
 import java.awt.*;
 import java.lang.reflect.InvocationTargetException;
+import java.time.Instant;
 
 @PluginDescriptor(
         name = PluginDescriptor.Default + "Microbot",
         description = "Microbot",
         tags = {"main", "microbot", "parent"},
         alwaysOn = true,
-        hidden = true
+        hidden = true,
+        priority = true
 )
 @Slf4j
 public class MicrobotPlugin extends Plugin {
@@ -76,6 +81,8 @@ public class MicrobotPlugin extends Plugin {
     @Inject
     private ClientThread clientThread;
     @Inject
+    private EventBus eventBus;
+    @Inject
     private ClientToolbar clientToolbar;
     @Inject
     private MicrobotOverlay microbotOverlay;
@@ -97,12 +104,16 @@ public class MicrobotPlugin extends Plugin {
     private PouchScript pouchScript;
     @Inject
     private PouchOverlay pouchOverlay;
+    @Inject
+    private MouseManager mouseManager;
 
     @Override
     protected void startUp() throws AWTException {
         Microbot.pauseAllScripts = false;
         Microbot.setClient(client);
         Microbot.setClientThread(clientThread);
+        Microbot.setEventBus(eventBus);
+        Microbot.setMouseManager(mouseManager);
         Microbot.setNotifier(notifier);
         Microbot.setWorldService(worldService);
         Microbot.setProfileManager(profileManager);
@@ -126,6 +137,8 @@ public class MicrobotPlugin extends Plugin {
         Microbot.setPouchScript(pouchScript);
         pouchScript.startUp();
         overlayManager.add(pouchOverlay);
+        Microbot.setRs2ItemManager(new Rs2ItemManager());
+
 
 
         new InputSelector(clientToolbar);
@@ -157,6 +170,9 @@ public class MicrobotPlugin extends Plugin {
 
     @Subscribe
     public void onGameStateChanged(GameStateChanged gameStateChanged) {
+        if (gameStateChanged.getGameState() == GameState.LOGGED_IN) {
+            Microbot.setLoginTime(Instant.now());
+        }
         if (gameStateChanged.getGameState() == GameState.HOPPING || gameStateChanged.getGameState() == GameState.LOGIN_SCREEN || gameStateChanged.getGameState() == GameState.CONNECTION_LOST) {
             if (Rs2Bank.bankItems != null) {
                 Rs2Bank.bankItems.clear();
@@ -263,7 +279,7 @@ public class MicrobotPlugin extends Plugin {
     @Subscribe
     public void onHitsplatApplied(HitsplatApplied event) {
         // Case 1: Hitsplat applied to the local player (indicates someone or something is attacking you)
-        if (event.getActor().equals(Rs2Player.getLocalPlayer())) {
+        if (event.getActor().equals(Microbot.getClient().getLocalPlayer())) {
             if (!event.getHitsplat().isOthers()) {
                 Rs2Player.updateCombatTime();
             }
